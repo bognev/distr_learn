@@ -41,9 +41,10 @@ print(test_labels_01.shape )
 print(test_images_01.shape )
 
 class Log_Reg:
-    def __init__(self, lr, num_iter):
+    def __init__(self, lr, num_iter, lmbd):
         self.lr = lr
         self.num_iter = num_iter
+        self.lmbd = lmbd
 
     def sigmoid(self, x):
         return 1/(1+np.exp(-x))
@@ -61,7 +62,7 @@ class Log_Reg:
             cost = (-1 / m) * (np.sum(y_T * np.log(y_estimation + epsilon) + (1 - y_T) * (np.log(1 - y_estimation + epsilon))))
             self.dw = (1 / m) * (np.dot(X_T, (y_estimation - y_T).T))
             self.db = (1 / m) * (np.sum(y_estimation - y_T))
-            self.w = self.w - self.lr * self.dw.T
+            self.w = self.w - self.lr * (self.dw.T + self.lmbd*self.w)
             self.b = self.b - self.lr * self.db
             self.costs[i] = cost
         return self.costs
@@ -76,19 +77,47 @@ class Log_Reg:
                 y_pred_bin[i] = 1
         return y_pred_bin
 
+    def performance(self, y_est, y_gt):
+        TP, TN, FP, FN, P, N = 0, 0, 0, 0, 0, 0
+        for idx, test_sample in enumerate(y_est):
+            if y_est[idx] == 1 and test_sample == 1:
+                TP = TP + 1
+                P = P + 1
+            elif y_est[idx] == 1 and test_sample == 0:
+                FP = FP + 1
+                N = N + 1
+            elif y_est[idx] == 0 and test_sample == 0:
+                TN = TN + 1
+                N = N + 1
+            elif y_est[idx] == 0 and test_sample == 1:
+                FN = FN + 1
+                P = P + 1
 
-log_reg_m = Log_Reg(lr=0.0001, num_iter=100)
+        accuracy = (TP + TN)/(P + N)
+        precision = TP/(TP + FP)
+        recall = TP/(TP + FN)
+        f_measure = 2 * (precision*recall/(precision + recall))
+        return accuracy, precision, recall, f_measure
+
+
+
+
+
+log_reg_m = Log_Reg(lr=0.0001, num_iter=100, lmbd=10)
 costs = log_reg_m.fit(X_train=train_images_01, y_train=train_labels_01)
+
+y_train = log_reg_m.predict(train_images_01, train_labels_01)
+print('Training Accuracy',accuracy_score(y_train, train_labels_01))
+y_test = log_reg_m.predict(test_images_01, test_labels_01)
+print('Test Accuracy',accuracy_score(y_test, test_labels_01))
+accuracy, precision, recall, f_measure = log_reg_m.performance(y_test, test_labels_01)
+print(accuracy, precision, recall, f_measure)
+
 plt.plot(costs)
 plt.ylabel('cost')
 plt.xlabel('iterations')
 plt.title('Cost reduction over time')
 plt.show()
-y_train = log_reg_m.predict(train_images_01, train_labels_01)
-print('Training Accuracy',accuracy_score(y_train, train_labels_01))
-#
-y_test = log_reg_m.predict(test_images_01, test_labels_01)
-print('Test Accuracy',accuracy_score(y_test, test_labels_01))
 
 
 
