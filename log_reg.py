@@ -99,17 +99,15 @@ class Log_Reg:
         f_measure = 2 * (precision*recall/(precision + recall))
         return accuracy, precision, recall, f_measure
 
-
-
-
-
 log_reg_m = Log_Reg(lr=0.0001, num_iter=100, lmbd=10)
 costs = log_reg_m.fit(X_train=train_images_01, y_train=train_labels_01)
 
 y_train = log_reg_m.predict(train_images_01, train_labels_01)
-print('Training Accuracy',accuracy_score(y_train, train_labels_01))
+# print('Training Accuracy',accuracy_score(y_train, train_labels_01))
 y_test = log_reg_m.predict(test_images_01, test_labels_01)
-print('Test Accuracy',accuracy_score(y_test, test_labels_01))
+# print('Test Accuracy',accuracy_score(y_test, test_labels_01))
+accuracy, precision, recall, f_measure = log_reg_m.performance(y_train, train_labels_01)
+print(accuracy, precision, recall, f_measure)
 accuracy, precision, recall, f_measure = log_reg_m.performance(y_test, test_labels_01)
 print(accuracy, precision, recall, f_measure)
 
