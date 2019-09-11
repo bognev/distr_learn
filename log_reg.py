@@ -200,7 +200,7 @@ class Log_Reg:
 
 
 
-log_reg_m = Log_Reg(lr=0.000001, num_iter=200, lmbd=0.1)
+log_reg_m = Log_Reg(lr=0.000001, num_iter=10, lmbd=0.1)
 # costs = log_reg_m.fit(X_train=train_images_01, y_train=train_labels_01)
 costs = log_reg_m.fit_base(K=8, X_train=train_images_01, y_train=train_labels_01)
 costs_distributed = log_reg_m.fit_alg1(K=5, X_train=train_images_01, y_train=train_labels_01)
