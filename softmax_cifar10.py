@@ -90,8 +90,6 @@ class SoftMax:
 
     def fit_vec_base(self):
         N_dp = self.X_train.shape[0]
-        y_T = self.y_train
-        X_T = self.X_train.T
         cost = np.zeros(int(self.num_iter))
         norm = np.zeros(int(self.num_iter))
         costs = np.zeros(N_dp)
@@ -99,6 +97,10 @@ class SoftMax:
         dW_2 = np.zeros((self.n_features, self.C))
         dW_3 = np.zeros((self.n_features, self.C))
         epsilon = 1e-5
+        self.X_train = np.column_stack((self.X_train, np.zeros(self.X_train.shape[0])))
+        self.X_train = np.column_stack((self.X_train, np.zeros(self.X_train.shape[0])))
+        y_T = self.y_train
+        X_T = self.X_train.T
         # y_est = np.zeros(K)
         for i in range(0, self.num_iter):
             # if i%10 == 0:
@@ -148,9 +150,10 @@ class SoftMax:
         return cost, norm
 
     def fit_vec_batch_alg1(self, K, N_batch=250, N_epoch=250):
-        self.network_topology(K)
+        # self.network_topology(K)
         N_dp = N_batch#self.X_train.shape[0]
         self.num_epochs = N_epoch
+        self.n_features +=2
         cost = np.zeros(int(self.num_epochs))
         norm = np.zeros(int(self.num_epochs))
         costs = np.zeros(N_dp)
@@ -161,38 +164,45 @@ class SoftMax:
         self.X_train = np.column_stack((self.X_train, np.zeros(self.X_train.shape[0])))
         self.X_train = np.column_stack((self.X_train, np.zeros(self.X_train.shape[0])))
         self.w_distr = np.zeros((K, self.C, int(round(self.n_features / K))))
-        z_ni_t = np.zeros((K, N_batch, self.C))
+        z_ni_t = np.zeros((K, self.C, N_batch))
         h_nik = np.zeros((K, N_batch, int(round(self.n_features / K))))
         self.y_train = np.array(self.y_train)
+        self.W = np.zeros((self.C, self.n_features))
         for n in range(0, self.num_epochs):
             ni = np.random.randint(0, len(self.y_train), N_dp).tolist()
-            for i in range(0, self.num_iter):
-                for k in range(K):
+            for k in range(K):
+                for i in range(0, self.num_iter):
                     # consensus update
-                    for l in range(K):
-                        if self.G1[k, l] != 0:
-                            z_ni_t[k,:] = z_ni_t[k,:] + self.G[k, l] * \
-                                        (self.X_train[np.array(ni)[:, None], \
-                                        np.arange(l * int(round(self.n_features / K)),\
-                                                  (l + 1) * int(round(self.n_features / K)))]\
-                                        @ self.w_distr[l, :, :].T)
-                    h_nik[k,:,:] = self.X_train[np.array(ni)[:, None], \
-                                                    np.arange(l * int(round(self.n_features / K)),\
-                                                              (l + 1) * int(round(self.n_features / K)))]
-                    x = z_ni_t[k].T
+                    # if(n != 0):
+                    #     for l in range(K):
+                    #         if self.G1[k, l] != 0:
+                    #             z_ni_t[k] += self.G[k, l] * K * self.w_distr[l]@\
+                    #                                 self.X_train[np.array(ni)[:, None], \
+                    #                                 np.arange(l * int(round(self.n_features / K)),\
+                    #                                           (l + 1) * int(round(self.n_features / K)))].T
+                    # else:
+                    z_ni_t[k] = self.w_distr[k] @ self.X_train[np.array(ni)[:, None], \
+                                                                   np.arange(k * int(round(self.n_features / K)), \
+                                                                             (k + 1) * int(round(self.n_features / K)))].T
+                    h_nik[k] = self.X_train[np.array(ni)[:, None], \
+                                                            np.arange(k * int(round(self.n_features / K)),\
+                                                                      (k + 1) * int(round(self.n_features / K)))]
+                    x = z_ni_t[k]
                     shiftx = x - x.max(0)
                     shiftx = np.exp(shiftx)
                     dW_1 = shiftx/np.sum(shiftx, axis=0)
                     dW_1[(self.y_train[ni],np.arange(0,N_dp))] -= 1
                     dW_2 = dW_1 @ h_nik[k] + self.lmbd * self.w_distr[k]
                     self.dW = (1/N_dp) * dW_2
-                    self.w_distr[k] = self.w_distr[k] + self.lr * self.dW
-            self.W = self.w_distr.reshape(10, 615*5)
-            X_T = self.X_train.T
+                    self.w_distr[k] = self.w_distr[k] - self.lr * self.dW
+            for k in range(K):
+                self.W[:, np.arange(k * int(round(self.n_features / K)), (k + 1) * int(round(self.n_features / K)))] = \
+                    self.w_distr[k]
+            X_T = self.X_train[ni].T
             x = self.W @ X_T
             shiftx = x - x.max(0)
             shiftx = np.exp(shiftx)
-            costs = np.log(shiftx[self.y_train[ni]] / np.sum(shiftx, axis=0) + epsilon)
+            costs = np.log(shiftx[(self.y_train[ni],np.arange(0, N_dp))] / np.sum(shiftx, axis=0) + epsilon)
             cost[n] = -(1 / N_dp) * np.sum(costs)
             norm[n] = np.linalg.norm(self.W)
         return cost, norm
@@ -201,15 +211,17 @@ class SoftMax:
         N_dp = self.X_test.shape[0]
         y_T = self.y_test
         X_T = self.X_test.T
-        y_pred = np.exp(self.W.T @ X_T) / (np.ones((self.C, 1)) * (np.ones((1, self.C)) @ np.exp(self.W.T @ X_T)))
+        #y_pred = np.exp(self.W.T @ X_T) / (np.ones((self.C, 1)) * (np.ones((1, self.C)) @ np.exp(self.W.T @ X_T)))
+        y_pred = np.exp(self.W[:, np.arange(0, self.n_features - 2)] @ X_T) / (
+                    np.ones((self.C, 1)) * (np.ones((1, self.C)) @ np.exp(self.W[:, np.arange(0, self.n_features - 2)] @ X_T)))
         y_pred_10 = y_pred.argmax(0)
         print('Test Accuracy', accuracy_score(y_pred_10, self.y_test))
         return y_pred_10
 
 
-soft_max = SoftMax(file="./cifar-10-batches-py/data_batch_1", lr=0.0000001, num_iter=100, lmbd=0.001, C=10)
-cost, norm = soft_max.fit_vec_batch_alg1(K=5, N_batch=250, N_epoch=100)
-# y_pred = soft_max.predict()
+soft_max = SoftMax(file="./cifar-10-batches-py/data_batch_1", lr=0.0000001, num_iter=1, lmbd=0.01, C=10)
+cost, norm = soft_max.fit_vec_batch_alg1(K=5,N_epoch=250, N_batch=1000)
+y_pred = soft_max.predict()
 
 # print(cost)
 
