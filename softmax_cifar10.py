@@ -358,7 +358,7 @@ class SoftMax:
 soft_max = SoftMax(file="./cifar-10-batches-py/data_batch_1", lr=1e-7, num_iter=1, lmbd=1e-03, C=10)
 soft_max_alg1 = SoftMax(file="./cifar-10-batches-py/data_batch_1", lr=1e-7, num_iter=1, lmbd=1e-03, C=10)
 # np.random.seed(10)
-cost_alg1, norm_alg1, norm_z_alg1 = soft_max_alg1.fit_vec_batch_alg2(K=5, N_epoch=1000, N_batch=60)
+cost_alg1, norm_alg1, norm_z_alg1 = soft_max_alg1.fit_vec_batch_alg2(K=5, N_epoch=1000, N_batch=40)
 # np.random.seed(10)
 cost, norm = soft_max.fit_vec_batch(N_epoch=1000, N_batch=30)#_alg1(K=15, N_epoch=1600, N_batch=10)
 
