@@ -364,7 +364,7 @@ cost, norm = soft_max.fit_vec_batch(N_epoch=1000, N_batch=30)#_alg1(K=15, N_epoc
 
 y_pred = soft_max.predict()
 y_pred_alg1 = soft_max_alg1.predict_alg1()
-
+# TODO remove b from regularization!
 # print(cost)
 
 plt.subplot(4, 1, 1)
