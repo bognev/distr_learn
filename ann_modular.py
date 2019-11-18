@@ -7,6 +7,7 @@ import pickle
 import matplotlib.pyplot as plt
 from matplotlib import style
 from scipy.signal import savgol_filter
+
 style.use("ggplot")
 import sys
 
@@ -55,7 +56,7 @@ class ANN:
         sys.stdout.write("[%-20s] %d%%" % ('=' * round(i / 10), (100 / self.num_epochs) * i))
         sys.stdout.flush()
 
-    def __init__(self, file, lr, num_iter, lmbd, C, std=1e-4, batch = 64, epoch = 100, hidden_size = 100):
+    def __init__(self, file, lr, num_iter, lmbd, C, std=1e-4, batch=64, epoch=100, hidden_size=100):
         self.lr = lr
         self.num_iter = num_iter
         self.lmbd = lmbd
@@ -83,42 +84,82 @@ class ANN:
         self.params['W2'] = std * np.random.randn(self.hidden_size, self.output_size)
         self.params['b2'] = std * np.random.randn(self.output_size)
 
-        self.W1, self.b1 = self.params['W1'], self.params['b1']
-        self.W2, self.b2 = self.params['W2'], self.params['b2']
+        self.cache = {}
 
-    def fit(self, X, y=None):
-        N = X.T.shape[1]
+    def affine_forward(self, x, w, b):
+        N = x.shape[0]
+        z = None
+        X = np.reshape(x, (N, -1))
+        z = X @ w + b  # z = WX + b
+        cache = (x, w, b)
+        return z, cache
 
-        z = X@self.W1 + self.b1
-        h = np.maximum(z, 0)
-        s = h@self.W2 + self.b2
+    def affine_backward(self, dout, cache):
+        x, w, b = cache
+        dx, dw, db = None, None, None
+        N = x.shape[0]
+        X = np.reshape(x, (N, -1))  # dout=dLoss/dz - gradient from previous step
+        dx = dout @ w.T   # dz/dx = dot(W.T, dout)
+        dw = X.T @ dout  # dz/wd = dot(dout, X)
+        db = np.sum(dout, axis=0)   # dz/db = sum(dout)
+        return dx, dw, db
 
-        x = s.T
-        shiftx = x - x.max(0)
+    def relu_forward(self, x):
+        cache = x
+        out = x * (x > 0)  # ReLu
+        return out, cache
+
+    def relu_backward(self, dout, cache):
+        x = cache
+        dx = dout * (x > 0)
+        return dx
+
+    def softmax_loss(self, x, y):
+        N = x.shape[0]
+        shiftx = x.T - x.T.max(0)
         shiftx = np.exp(shiftx)
         out = shiftx / np.sum(shiftx, axis=0)
         out = out.T
+        loss = np.log(out[(np.arange(N), y)] / np.sum(out, axis=1) + self.epsilon)
+        loss = -np.sum(loss) / N
+        dout = out  # dLoss/dx
+        dout[(np.arange(N), y)] -= 1
+        dout /= N
+        return loss, dout
+
+    def affine_relu_forward(self, x, w, b):
+        z_fc, cache_fc = self.affine_forward(x, w, b)
+        z_relu, cache_relu = self.relu_forward(z_fc)
+        cache = (cache_fc, cache_relu)
+        return z_relu, cache
+
+    def affine_relu_backward(self, dout, cache):
+        fc_cache, relu_cache = cache
+        da = self.relu_backward(dout, relu_cache)
+        dx, dw, db = self.affine_backward(da, fc_cache)
+        return dx, dw, db
+
+    def fit(self, X, y=None):
+        self.W1, self.b1 = self.params['W1'], self.params['b1']
+        self.W2, self.b2 = self.params['W2'], self.params['b2']
+
+        hidden, self.cache["hidden"] = self.affine_relu_forward(X, self.W1, self.b1)
+        out, self.cache["out"] = self.affine_forward(hidden, self.W2, self.b2)
 
         if y is None:
             return out
 
-        costs = np.log(out[(np.arange(N), np.array(y))] / np.sum(out, axis=1) + self.epsilon)
-        loss = -np.sum(costs) / N
-        loss += 0.5 * self.lmbd * (np.sum(self.W1**2) + np.sum(self.W2**2))
+        loss, grad = 0, {}
+        loss, delta3 = self.softmax_loss(out, y)
+        loss += 0.5 * self.lmbd * (np.sum(self.W1.__pow__(2)) + np.sum(self.W2.__pow__(2)))
 
-        grad = {}
-        dout = out
-        dout[(np.arange(N), np.array(y))] -= 1
-        dh = dout @ self.W2.T
-        dz = dh * (z > 0)
-
-        grad['W2'] = h.T @ dout / N
-        grad['b2'] = np.sum(dout, axis=0) / N
-        grad['W1'] = X.T @ dz / N
-        grad['b1'] = np.sum(dz, axis=0) / N
+        delta2, grad["W2"], grad["b2"] = self.affine_backward(delta3, self.cache["out"])
+        delta1, grad["W1"], grad["b1"] = self.affine_relu_backward(delta2, self.cache["hidden"])
 
         grad['W2'] += self.lmbd * self.W2
         grad['W1'] += self.lmbd * self.W1
+
+        return loss, grad
 
         return loss, grad
 
@@ -138,7 +179,7 @@ class ANN:
             self.lr *= 0.999
             test_loss = self.predict(switch=1)
             loss_story.append(loss)
-            test_loss_story.append(test_loss)#np.linalg.norm(self.W2))
+            test_loss_story.append(test_loss)  # np.linalg.norm(self.W2))
             self.progress(n)
         return loss_story, test_loss_story
 
@@ -148,18 +189,45 @@ class ANN:
         y_pred = self.fit(X)
         y_pred_10 = y_pred.argmax(1)
         test_acc = accuracy_score(y_pred_10, y)
-        if(switch is None):
+        if (switch is None):
             print('\nTest Accuracy', test_acc)
             return y_pred_10
         else:
             return test_acc
 
+    def test(self):
+        num_inputs = 2
+        input_shape = (4,5,6)
+        output_dim = 3
+
+        input_size = num_inputs * np.prod(input_shape)
+        weight_size = output_dim * np.prod(input_shape)
+
+        x = np.linspace(-0.1, 0.5, num=input_size).reshape(num_inputs, *input_shape)
+        w = np.linspace(-0.2, 0.3, num=weight_size).reshape(np.prod(input_shape), output_dim)
+        b = np.linspace(-0.3, 0.1, num=output_dim)
+        out, _ = self.affine_forward(x, w, b)
+        print(out)
+
+        x = np.random.randn(10, 2, 3)
+        w = np.random.randn(6, 5)
+        b = np.random.randn(5)
+        dout = np.random.randn(10, 5)
+
+        _, cache = self.affine_forward(x, w, b)
+        dx, dw, db = self.affine_backward(dout, cache)
+
+        print('Testing affine_backward function:')
+        print(dx.shape)
+
+
 
 ann_clf = ANN(file="./cifar-10-batches-py/data_batch_1", lr=1e-3, num_iter=10, \
               lmbd=0.001, C=10, batch=128, epoch=500, hidden_size=100)
-# np.random.seed(10)
+
+#ann_clf.test()
+
 loss, test_loss = ann_clf.train()
-norm = 0
 y_pred = ann_clf.predict()
 
 plt.subplot(2, 1, 1)
@@ -169,12 +237,5 @@ plt.tight_layout()
 plt.ylabel('cost')
 plt.subplot(2, 1, 2)
 plt.plot(test_loss)
-# plt.tight_layout()
-# plt.ylabel('norm')
-# plt.ylabel('norm_z')
-# plt.xlabel('epochs')
 plt.tight_layout()
 plt.show()
-
-
-
