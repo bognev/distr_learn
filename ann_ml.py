@@ -25,7 +25,7 @@ style.use("ggplot")
 import sys
 
 
-class ANN:
+class FCN:
     def unpickle(self, file):
         with open(file, 'rb') as fo:
             batch = pickle.load(fo, encoding='bytes')
@@ -55,40 +55,6 @@ class ANN:
         sys.stdout.write('\r')
         sys.stdout.write("[%-20s] %d%%" % ('=' * round(i / 10), (100 / self.num_epochs) * i))
         sys.stdout.flush()
-
-    def __init__(self, file, lr, num_iter, lmbd, C, std=1e-2, batch=64, epoch=100, hidden_size=100, verbose=0):
-        self.verbose = verbose
-        self.lr = lr
-        self.num_iter = num_iter
-        self.lmbd = lmbd
-        self.C = C
-        self.batch = self.unpickle(file)
-        self.X = self.batch[b'data']
-        self.y = self.batch[b'labels']
-        self.batch = batch
-        self.num_epochs = epoch
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y)
-        mean_image = np.mean(self.X_train, axis=0)
-        self.X_train = self.X_train.astype(np.float64)
-        self.X_test = self.X_test.astype(np.float64)
-        self.X_train -= mean_image
-        self.X_test -= mean_image
-        self.epsilon = 1e-5
-
-        self.input_size = self.X_train.T.shape[0]
-        self.hidden_size = hidden_size
-        self.output_size = self.C
-
-        self.params = {}
-        self.W1 = std * np.random.randn(self.input_size, self.hidden_size)#np.sqrt(2.0/self.input_size)
-        self.b1 = np.zeros(self.hidden_size)
-        self.W2 = std * np.random.randn(self.hidden_size, self.output_size)#np.sqrt(2.0/self.hidden_size)
-        self.b2 = np.zeros(self.output_size)
-
-        #self.W1, self.b1 = self.params['W1'], self.params['b1']
-        #self.W2, self.b2 = self.params['W2'], self.params['b2']
-
-        self.cache = {}
 
     def affine_forward(self, x, w, b):
         N = x.shape[0]
@@ -143,42 +109,93 @@ class ANN:
         dx, dw, db = self.affine_backward(da, fc_cache)
         return dx, dw, db
 
+    def __init__(self, file, lr, num_iter, hidden_dims, lmbd, C, std=1e-2, batch_size=64, epoch=100, verbose=0):
+        self.use_batchnorm = None
+        self.use_dropout = None
+        self.num_layers = 1 + len(hidden_dims)
+        self.params = {}
+        self.cache = {}
+        self.verbose = verbose
+        self.lr = lr
+        self.num_iter = num_iter
+        self.lmbd = lmbd
+        self.C = C
+        self.batch = self.unpickle(file)
+        self.batch_size = batch_size
+        self.num_epochs = epoch
+
+        self.X = np.array(self.batch[b'data'])
+        self.y = np.array(self.batch[b'labels'])
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y)
+        mean_image = np.mean(self.X_train, axis=0)
+        self.X_train = self.X_train.astype(np.float64)
+        self.X_test = self.X_test.astype(np.float64)
+        self.X_train -= mean_image
+        self.X_test -= mean_image
+        self.epsilon = 1e-5
+
+        self.input_size = self.X_train.T.shape[0]
+        self.output_size = self.C
+
+        for i in range(self.num_layers):
+            if i==0:
+                self.params["W" + str(i)] = std * np.random.randn(self.input_size, hidden_dims[i])
+                self.params["b" + str(i)] = np.zeros(hidden_dims[i])
+            elif i<self.num_layers-1:
+                self.params["W" + str(i)] = std * np.random.randn(hidden_dims[i-1], hidden_dims[i])
+                self.params["b" + str(i)] = np.zeros(hidden_dims[i])
+            else:
+                self.params["W" + str(i)] = std * np.random.randn(hidden_dims[i-1], self.C)
+                self.params["b" + str(i)] = np.zeros(self.C)
+
     def fit(self, X, y=None):
-        hidden, self.cache["hidden"] = self.affine_relu_forward(X, self.W1, self.b1)
-        out, self.cache["out"] = self.affine_forward(hidden, self.W2, self.b2)
+        a = {"layer0" : X}
+        self.cache = {"layer0": X}
+        for i in range(self.num_layers):
+            l, l_prev = 'layer' + str(i + 1), 'layer' + str(i)
+            W, b = self.params["W"+str(i)], self.params["b"+str(i)]
+            if i < self.num_layers - 1:
+                a[l], self.cache[l] = self.affine_relu_forward(a[l_prev], W, b)
+            else:
+                a[l], self.cache[l] = self.affine_forward(a[l_prev], W, b)
+
+        out = a["layer"+str(self.num_layers)]
 
         if y is None:
             return out
 
-        loss, grad = 0, {}
-        loss, delta3 = self.softmax_loss(out, y)
-        loss += 0.5 * self.lmbd * (np.sum(self.W1**2) + np.sum(self.W2**2))
+        loss, grad, delta  = 0, {}, {}
+        loss, dout = self.softmax_loss(out, y)
+        for i in range(self.num_layers):
+            loss += 0.5 * self.lmbd * np.sum(self.params["W"+str(i)]**2)
 
-        delta2, grad["W2"], grad["b2"] = self.affine_backward(delta3, self.cache["out"])
-        delta1, grad["W1"], grad["b1"] = self.affine_relu_backward(delta2, self.cache["hidden"])
+        for i in reversed(range(self.num_layers)):
+            l, l_prev = 'layer' + str(i + 1), 'layer' + str(i)
+            if i==self.num_layers-1:
+                delta[l_prev], grad["W" + str(i)], grad["b" + str(i)] = self.affine_backward(dout, self.cache[l])
+            elif i<self.num_layers-1:
+                delta[l_prev], grad["W" + str(i)], grad["b" + str(i)] = self.affine_relu_backward(delta[l], self.cache[l])
 
-        grad['W2'] += self.lmbd * self.W2
-        grad['W1'] += self.lmbd * self.W1
+        for i in range(self.num_layers):
+            grad["W" + str(i)] += self.lmbd * self.params["W" + str(i)]
 
         return loss, grad
 
     def train(self):
         loss_story, test_loss_story, train_loss_story = [], [], []
         num_train = self.X_train.shape[0]
-        iterations_per_epoch = max(num_train / self.batch, 1)
+        iterations_per_epoch = max(num_train / self.batch_size, 1)
         num_epoch = 1
         for i in range(self.num_iter):
-            rand_range = np.random.randint(0, len(self.y_train), self.batch)
+            rand_range = np.random.randint(0, self.y_train.shape[0], self.batch_size)
             X = self.X_train[rand_range]
-            y = np.array(self.y_train)[rand_range]
+            y = self.y_train[rand_range]
             loss, grad = self.fit(X, y)
             loss_story.append(loss)
-            self.W2 -= self.lr * grad['W2']
-            self.W1 -= self.lr * grad['W1']
-            self.b2 -= self.lr * grad['b2']
-            self.b1 -= self.lr * grad['b1']
-            #self.params['W1'], self.params['b1'] = self.W1, self.b1
-            #self.params['W2'], self.params['b2'] = self.W2, self.b2
+            for ii in range(self.num_layers):
+                self.params["W" + str(ii)] -= self.lr * grad["W" + str(ii)]
+                self.params["b" + str(ii)] -= self.lr * grad["b" + str(ii)]
+
             if self.verbose and i % 25 == 0:
                 print('iteration %d / %d: loss %f' % (i, self.num_iter, loss))
             if i % iterations_per_epoch == 0:
@@ -229,8 +246,8 @@ class ANN:
 
 
 
-ann_clf = ANN(file="./cifar-10-batches-py/data_batch_1", lr=1e-3, num_iter=7500, \
-              lmbd=5, C=10, batch=100, epoch=100, hidden_size=100, verbose=0)
+ann_clf = FCN(file="./cifar-10-batches-py/data_batch_1", lr=1e-3, num_iter=7500, \
+              hidden_dims = [100, 50], lmbd=0.1, C=10, batch_size=100, epoch=100, verbose=0)
 
 #ann_clf.test()
 
