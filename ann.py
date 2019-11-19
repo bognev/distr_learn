@@ -109,13 +109,14 @@ class ANN:
         grad = {}
         dout = out
         dout[(np.arange(N), np.array(y))] -= 1
+        dout = dout / N
         dh = dout @ self.W2.T
         dz = dh * (z > 0)
 
-        grad['W2'] = h.T @ dout / N
-        grad['b2'] = np.sum(dout, axis=0) / N
-        grad['W1'] = X.T @ dz / N
-        grad['b1'] = np.sum(dz, axis=0) / N
+        grad['W2'] = h.T @ dout
+        grad['b2'] = np.sum(dout, axis=0)
+        grad['W1'] = X.T @ dz
+        grad['b1'] = np.sum(dz, axis=0)
 
         grad['W2'] += self.lmbd * self.W2
         grad['W1'] += self.lmbd * self.W1
