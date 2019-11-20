@@ -230,7 +230,7 @@ class ANN:
 
 
 ann_clf = ANN(file="./cifar-10-batches-py/data_batch_1", lr=1e-3, num_iter=7500, \
-              lmbd=5, C=10, batch=100, epoch=100, hidden_size=100, verbose=0)
+              lmbd=5, C=10, batch=100, epoch=100, hidden_size=100, verbose=1)
 
 #ann_clf.test()
 
