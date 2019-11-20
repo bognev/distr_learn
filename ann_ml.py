@@ -95,7 +95,42 @@ class FCN:
         dx, dw, db = self.affine_backward(da, fc_cache)
         return dx, dw, db
 
-    def __init__(self, file, lr, num_iter, hidden_dims, lmbd, C, std=1e-2, batch_size=64, epoch=100, verbose=0, N_train=None):
+    def sgd(self, w, dw, config=None):
+        w -= self.lr * dw
+        return w, config
+
+    def sgd_momentum(self, w, dw, name):
+        if self.v.get(name) is None:
+            self.v[name] = np.zeros_like(w)
+        mu = self.config.get("momentum")
+        lr = self.config.get("learning_rate")
+        self.v[name] = mu * self.v[name] - lr * dw
+        w += self.v[name]
+        return w
+
+    def nesterov_momentum(self, w, dw, name):
+        if self.v.get(name) is None:
+            self.v[name] = np.zeros_like(w)
+        mu = self.config.get("momentum")
+        lr = self.config.get("learning_rate")
+        dw_ahead = dw + mu * self.v[name]
+        self.v[name] = mu * self.v[name] - lr * dw_ahead
+        w += self.v[name]
+        return w
+
+    def rmsprop(self, w, dw, name):
+        if self.v.get(name) is None:
+            self.v[name] = np.zeros_like(w)
+        lr = self.config.get("learning_rate")
+        dr = self.config.get("decay_rate")
+        self.v[name] = dr * self.v[name] + (1 - dr) * dw**2
+        w = w - lr*dw/(np.sqrt(self.v[name])+1e-8)
+        return w
+
+    def __init__(self, file, lr, hidden_dims, lmbd, C, std=1e-2, batch_size=64, epoch=100, verbose=0, N_train=None, \
+                 momentum=0.5, decay_rate=0.99):
+        self.config = {"learning_rate" : lr, "momentum" : momentum, "decay_rate" : decay_rate}
+        self.v = {}
         self.use_batchnorm = None
         self.use_dropout = None
         self.num_layers = 1 + len(hidden_dims)
@@ -103,7 +138,6 @@ class FCN:
         self.cache = {}
         self.verbose = verbose
         self.lr = lr
-        self.num_iter = num_iter
         self.lmbd = lmbd
         self.C = C
         self.batch = self.unpickle(file)
@@ -116,7 +150,8 @@ class FCN:
             self.N_train = len(self.y)
         else:
             self.N_train = N_train
-        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X[0:self.N_train, :], self.y[0:self.N_train])
+        self.X_train, self.X_test, self.y_train, self.y_test = \
+            train_test_split(self.X[0:self.N_train, :], self.y[0:self.N_train])
         mean_image = np.mean(self.X_train, axis=0)
         self.X_train = self.X_train.astype(np.float64)
         self.X_test = self.X_test.astype(np.float64)
@@ -125,17 +160,15 @@ class FCN:
         self.epsilon = 1e-5
         self.input_size = self.X_train.T.shape[0]
 
-
-
         for i in range(self.num_layers):
             if i==0:
-                self.params["W" + str(i)] = std * np.random.randn(self.input_size, hidden_dims[i])
+                self.params["W" + str(i)] = np.sqrt(2/self.input_size) * np.random.randn(self.input_size, hidden_dims[i])
                 self.params["b" + str(i)] = np.zeros(hidden_dims[i])
             elif i<self.num_layers-1:
-                self.params["W" + str(i)] = std * np.random.randn(hidden_dims[i-1], hidden_dims[i])
+                self.params["W" + str(i)] = np.sqrt(2/hidden_dims[i-1]) * np.random.randn(hidden_dims[i-1], hidden_dims[i])
                 self.params["b" + str(i)] = np.zeros(hidden_dims[i])
             else:
-                self.params["W" + str(i)] = std * np.random.randn(hidden_dims[i-1], self.C)
+                self.params["W" + str(i)] = np.sqrt(2/hidden_dims[i-1]) * np.random.randn(hidden_dims[i-1], self.C)
                 self.params["b" + str(i)] = np.zeros(self.C)
 
     def fit(self, X, y=None):
@@ -174,10 +207,11 @@ class FCN:
         return loss, grad
 
     def train(self):
-        loss_story, test_loss_story, train_loss_story = [], [], []
+        loss_story, test_loss_story, train_loss_story, weight_scale_story = [], [], [], []
         num_train = self.X_train.shape[0]
         iterations_per_epoch = np.round(max(num_train / self.batch_size, 1))
-        num_epoch = 0
+        self.num_iter = np.round(self.num_epochs*iterations_per_epoch).astype(np.int)
+        num_epoch = 1
         for i in range(self.num_iter):
             rand_range = np.random.randint(0, self.y_train.shape[0], self.batch_size)
             X = self.X_train[rand_range]
@@ -186,21 +220,25 @@ class FCN:
             loss_story.append(loss)
             for ii in range(self.num_layers):
                 w, b = "W" + str(ii), "b" + str(ii)
-                self.params[w] -= self.lr * grad[w]
-                self.params[b] -= self.lr * grad[b]
+                self.params[w] = self.rmsprop(self.params[w], grad[w], w)
+                self.params[b] = self.rmsprop(self.params[b], grad[b], b)
+
+            param_scale = np.linalg.norm(self.params["W0"].ravel())
+            update_scale = np.linalg.norm(grad["W0"].ravel())
+            weight_scale_story.append(param_scale/update_scale)
 
             if self.verbose and i % 10 == 0:
                 print('iteration %d / %d: loss %f' % (i, self.num_iter, loss))
             if i % iterations_per_epoch == 0:
-                self.lr *= 0.95
+                self.config["learning_rate"] *= 1
                 train_loss = self.predict(self.X_train, self.y_train, switch=1)
                 test_loss = self.predict(self.X_test, self.y_test, switch=1)
                 test_loss_story.append(test_loss)  # np.linalg.norm(self.W2))
                 train_loss_story.append(train_loss)  # np.linalg.norm(self.W2))
-                print('Epoch %d / %d: train_acc %f; test_acc %f' % (num_epoch, np.round(self.num_iter/iterations_per_epoch), train_loss, test_loss))
+                print('Epoch %d / %d: train_acc %f; test_acc %f' % (num_epoch, self.num_epochs, train_loss, test_loss))
                 num_epoch += 1
             #self.progress(n)
-        return loss_story, test_loss_story, train_loss_story
+        return loss_story, test_loss_story, train_loss_story, weight_scale_story
 
     def predict(self, X, y, switch=None):
         y_pred = self.fit(X)
@@ -239,12 +277,12 @@ class FCN:
 
 
 
-ann_clf = FCN(file="./cifar-10-batches-py/data_batch_1", lr=1e-3, num_iter=7000, \
-              hidden_dims = [100], lmbd=3, C=10, batch_size=100, epoch=100, verbose=0, std=0.01, N_train=10000)
+ann_clf = FCN(file="./cifar-10-batches-py/data_batch_1", lr=1e-3, hidden_dims = [100], lmbd=0.05, C=10, \
+              batch_size=100, epoch=30, verbose=0, std=1e-3, N_train=10000, momentum=0.5, decay_rate=0.999)
 
 #ann_clf.test()
 
-loss, test_loss, train_loss = ann_clf.train()
+loss, test_loss, train_loss, update = ann_clf.train()
 print("\n")
 print(loss[-1], test_loss[-1], train_loss[-1])
 
@@ -255,9 +293,10 @@ plt.tight_layout()
 plt.subplot(3, 1, 2)
 plt.tight_layout()
 plt.plot(test_loss)
-plt.ylabel('Test accuracy')
-plt.subplot(3, 1, 3)
 plt.plot(train_loss)
-plt.ylabel('Train accuracy')
+plt.ylabel('Test/test accuracy')
+plt.subplot(3, 1, 3)
+plt.plot(update)
+plt.ylabel('Update')
 plt.tight_layout()
 plt.show()
