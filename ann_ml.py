@@ -134,18 +134,22 @@ class FCN:
 
         return y, cache
 
-    def dropout_forward(self, x, p, mode):
+    def dropout_forward(self, x, p, mode, cache):
+        r = np.random.binomial(1, p, x.shape) / p
         if mode == 'train':
-            r = np.random.binomial(1, p, x.shape)/p
             y = r*x
         else:
             y = x
-        cache = (x, r)
-        return y, cache
+        fc_cache, cache_bn, relu_cache = cache
+        cache_do = (x, r)
+        cache_out = (fc_cache, cache_bn, relu_cache, cache_do)
+        return y, cache_out
 
     def dropout_backward(self, dout, cache):
-        x, r = cache
-        return dout*r
+        fc_cache, cache_bn, relu_cache, cache_do = cache
+        x, r = cache_do
+        cache_out = (fc_cache, cache_bn, relu_cache)
+        return dout*r, cache_out
 
     def batch_norm_backward(self, dout, cache):
         x, x_bn, mu, sigma, gamma, betta = cache
@@ -205,12 +209,18 @@ class FCN:
         self.lr = lr
         self.lmbd = lmbd
         self.C = C
-        self.batch = self.unpickle(file)
+        self.batch1 = self.unpickle(file + "1")
+        self.batch2 = self.unpickle(file + "2")
+        self.batch3 = self.unpickle(file + "3")
+        self.batch4 = self.unpickle(file + "4")
+        # self.batch5 = self.unpickle(file + "5")
         self.batch_size = batch_size
         self.num_epochs = epoch
         self.output_size = self.C
-        self.X = np.array(self.batch[b'data'])
-        self.y = np.array(self.batch[b'labels'])
+        self.X = np.concatenate((self.batch1[b'data'], self.batch2[b'data'], self.batch3[b'data'], self.batch4[b'data']))#,
+                                 # self.batch5[b'data'], ))
+        self.y = np.concatenate((self.batch1[b'labels'], self.batch2[b'labels'], self.batch3[b'labels'], self.batch4[b'labels']))#,
+                                 # self.batch5[b'labels'],))
         if N_train is None:
             self.N_train = len(self.y)
         else:
@@ -267,7 +277,7 @@ class FCN:
                 else:
                     a[l], self.cache[l] = self.affine_relu_forward(a[l_prev], W, b)
                 if self.dropout:
-                    a[l], self.cache[l] = self.dropout_forward(a[l], 0.5, mode)
+                    a[l], self.cache[l] = self.dropout_forward(a[l], 0.5, mode, self.cache[l])
             else:
                 a[l], self.cache[l] = self.affine_forward(a[l_prev], W, b)
 
@@ -277,7 +287,7 @@ class FCN:
             return out
 
         loss, grad, dout  = 0, {}, {}
-        loss, dout = self.softmax_loss(out, y)
+        loss, delta = self.softmax_loss(out, y)
         for i in range(self.num_layers):
             w = "W"+str(i)
             loss += 0.5 * self.lmbd * np.sum(self.params[w]**2)
@@ -287,10 +297,10 @@ class FCN:
             w, b = "W" + str(i), "b" + str(i)
             gamma, betta = "gamma" + str(i), "betta" + str(i)
             if i==self.num_layers-1:
-                dout[l_prev], grad[w], grad[b] = self.affine_backward(dout, self.cache[l])
+                dout[l_prev], grad[w], grad[b] = self.affine_backward(delta, self.cache[l])
             elif i<self.num_layers-1:
-                if self.dropout == 1:
-                    dout[l] = self.dropout_backward(dout[l], self.cache[l])
+                if self.dropout:
+                    dout[l], self.cache[l] = self.dropout_backward(dout[l], self.cache[l])
                 if self.normalization:
                     dout[l_prev], grad[w], grad[b], grad[gamma], grad[betta] = \
                         self.affine_batchnorm_relu_backward(dout[l], self.cache[l])
@@ -318,12 +328,12 @@ class FCN:
             loss_story.append(loss)
             for ii in range(self.num_layers):
                 w, b = "W" + str(ii), "b" + str(ii)
-                self.params[w] = self.rmsprop(self.params[w], grad[w], w)
-                self.params[b] = self.rmsprop(self.params[b], grad[b], b)
+                self.params[w] = self.nesterov_momentum(self.params[w], grad[w], w)
+                self.params[b] = self.nesterov_momentum(self.params[b], grad[b], b)
                 if ii<self.num_layers-1 and self.normalization == 1:
                     gamma, betta = "gamma" + str(ii), "betta" + str(ii)
-                    self.params[gamma] = self.rmsprop(self.params[gamma], grad[gamma], gamma)
-                    self.params[betta] = self.rmsprop(self.params[betta], grad[betta], betta)
+                    self.params[gamma] = self.nesterov_momentum(self.params[gamma], grad[gamma], gamma)
+                    self.params[betta] = self.nesterov_momentum(self.params[betta], grad[betta], betta)
 
             param_scale = np.linalg.norm(self.params["W0"].ravel())
             update_scale = self.config["learning_rate"]*np.linalg.norm(grad["W0"].ravel())/grad["W0"].ravel().shape[0]
@@ -332,7 +342,7 @@ class FCN:
             if self.verbose and i % 10 == 0:
                 print('iteration %d / %d: loss %f' % (i, self.num_iter, loss))
             if i % iterations_per_epoch == 0:
-                self.config["learning_rate"] *= 0.7
+                self.config["learning_rate"] *= 0.85
                 train_loss = self.predict(self.X_train, self.y_train, N_train=1000, switch=1)
                 test_loss = self.predict(self.X_test, self.y_test, switch=1)
                 test_loss_story.append(test_loss)  # np.linalg.norm(self.W2))
@@ -381,8 +391,8 @@ class FCN:
 
 
 
-ann_clf = FCN(file="./cifar-10-batches-py/data_batch_2", lr=0.4e-3, hidden_dims = [100], lmbd=0.1, C=10, \
-              batch_size=100, epoch=30, verbose=0, std=1e-3, N_train=10000, momentum=0.99, decay_rate=0.99, \
+ann_clf = FCN(file="./cifar-10-batches-py/data_batch_", lr=1e-3, hidden_dims = [100], lmbd=0.01, C=10, \
+              batch_size=64, epoch=40, verbose=0, std=1e-3, N_train=40000, momentum=0.99, decay_rate=0.99, \
               normalization=1, dropout=1)
 
 #ann_clf.test()
