@@ -400,18 +400,34 @@ class CCN:
         C_out = K
         out_shape = (N, C_out, W_out, H_out)
         out = np.zeros(out_shape)
-        x = np.pad(x, ((0, 0), (0, 0), (1, 1), (1, 1)), mode='constant', constant_values=0)
-        for n in range(N): #over images
-            for k in range(K): #over filters
-                for c in range(C): #over channels in image
-                    for ix in range(W_out):
-                        for iy in range(H_out):
-                            # print(n, k, ix, iy)
-                            # print(list(np.arange(ix * S, ix * S + F)))
-                            # print(list(np.arange(iy * S, iy * S + F)))
-                            out[n,k,ix,iy] = out[n,k,ix,iy] + np.sum(w[k,c]*x[n,c][np.ix_(np.arange(ix*S,ix*S+F).tolist(),np.arange(iy*S,iy*S+F).tolist())])
+        x_pad = np.pad(x, ((0, 0), (0, 0), (P, P), (P, P)), mode='constant', constant_values=0)
+        for k in range(K): #over filters
+            for ix in range(W_out):
+                for iy in range(H_out):
+                    out[:,k,ix,iy] = np.sum(w[k,np.arange(C)]*x_pad[np.ix_(np.arange(N), np.arange(C), np.arange(ix*S,ix*S+F),np.arange(iy*S,iy*S+F))], axis=(1,2,3)) + b[k]
+        # for n in range(N): #over images
+        #     for k in range(K): #over filters
+        #         for c in range(C): #over channels in image
+        #             for ix in range(W_out):
+        #                 for iy in range(H_out):
+        #                     # print(n, k, ix, iy)
+        #                     # print(list(np.arange(ix * S, ix * S + F)))
+        #                     # print(list(np.arange(iy * S, iy * S + F)))
+        #                     out[n,k,ix,iy] = out[n,k,ix,iy] + np.sum(w[k,c]*x[n,c][np.ix_(np.arange(ix*S,ix*S+F).tolist(),np.arange(iy*S,iy*S+F).tolist())])
+        cache = (x, w, b, conv_params)
 
-        return out, cache
+        return x, cache
+
+    def conv_backward_naive(self, dout, cache):
+        x, w, b, conv_params = cache
+        N, C, W, H = x.shape  # #images, #channels, width, height
+        K, _, F, F = w.shape  # #filters, #channels, field width, field height
+        P = conv_params['padding']
+        S = conv_params['stride']
+        dx, dw, db = np.zeros_like(x), np.zeros_like(w), np.zeros_like(b)
+        x_pad = np.pad(x, ((0, 0), (0, 0), (P, P), (P, P)), mode='constant', constant_values=0)
+
+        return dx, dw, db
 
 def rel_error(x, y):
   return np.max(np.abs(x - y) / (np.maximum(1e-8, np.abs(x) + np.abs(y))))
@@ -422,8 +438,8 @@ cnn_clf = CCN(file="./cifar-10-batches-py/data_batch_", lr=1e-3, hidden_dims = [
               normalization=1, dropout=1)
 
 #ann_clf.test()
-x_shape = (1, 3, 5, 5)
-w_shape = (1, 3, 3, 3)
+x_shape = (5, 3, 5, 5)
+w_shape = (2, 3, 3, 3)
 x = np.linspace(-0.1, 0.5, num=np.prod(x_shape)).reshape(x_shape)
 w = np.linspace(-0.2, 0.3, num=np.prod(w_shape)).reshape(w_shape)
 b = np.linspace(-0.1, 0.2, num=2)
