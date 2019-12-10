@@ -390,7 +390,7 @@ class CCN:
         print(dx.shape)
 
     def conv_forward_naive(self, x, w, b, conv_params):
-        out, cache = 0, 0
+        out, cache = None, None
         N, C, W, H = x.shape # #images, #channels, width, height
         K, _, F, F = w.shape # #filters, #channels, field width, field height
         P = conv_params['padding']
@@ -432,8 +432,7 @@ class CCN:
                 for c in range(C): #over channels in image
                     for ix in range(W_out):
                         for iy in range(H_out):
-                            dw[k,c,ix,iy] = dw[k,c,ix,iy] + np.sum(dout[n,k][np.ix_(np.arange(ix,ix+F).tolist(),np.arange(iy,iy+F).tolist())]*\
-                                                                   x_pad[n,c][np.ix_(np.arange(ix*S,ix*S+F).tolist(),np.arange(iy*S,iy*S+F).tolist())])
+                            dw[k,c,ix,iy] += np.sum(dout[n,k,ix,iy]*x_pad[np.ix_(n,c,np.arange(ix*S,ix*S+F),np.arange(iy*S,iy*S+F))])
 
         return dx, dw, db
 
