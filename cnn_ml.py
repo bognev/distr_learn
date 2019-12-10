@@ -432,7 +432,8 @@ class CCN:
                 for c in range(C): #over channels in image
                     for ix in range(W_out):
                         for iy in range(H_out):
-                            dw[k,c,ix,iy] = dw[k,c,ix,iy] + np.sum(dout[n,k,ix,iy]*x[n,c][np.ix_(np.arange(ix*S,ix*S+F).tolist(),np.arange(iy*S,iy*S+F).tolist())])
+                            dw[k,c,ix,iy] = dw[k,c,ix,iy] + np.sum(dout[n,k][np.ix_(np.arange(ix,ix+F).tolist(),np.arange(iy,iy+F).tolist())]*\
+                                                                   x_pad[n,c][np.ix_(np.arange(ix*S,ix*S+F).tolist(),np.arange(iy*S,iy*S+F).tolist())])
 
         return dx, dw, db
 
