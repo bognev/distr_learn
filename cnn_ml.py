@@ -420,12 +420,19 @@ class CCN:
 
     def conv_backward_naive(self, dout, cache):
         x, w, b, conv_params = cache
-        N, C, W, H = x.shape  # #images, #channels, width, height
-        K, _, F, F = w.shape  # #filters, #channels, field width, field height
+        N, K, W_out, H_out = dout.shape  # #images, #filters, out width, out height
+        _, C, F, _ = w.shape  # #filters, #channels, receptive field width, receptive field height
         P = conv_params['padding']
         S = conv_params['stride']
         dx, dw, db = np.zeros_like(x), np.zeros_like(w), np.zeros_like(b)
         x_pad = np.pad(x, ((0, 0), (0, 0), (P, P), (P, P)), mode='constant', constant_values=0)
+
+        for n in range(N): #over images
+            for k in range(K): #over filters
+                for c in range(C): #over channels in image
+                    for ix in range(W_out):
+                        for iy in range(H_out):
+                            dw[k,c,ix,iy] = dw[k,c,ix,iy] + np.sum(dout[n,k,ix,iy]*x[n,c][np.ix_(np.arange(ix*S,ix*S+F).tolist(),np.arange(iy*S,iy*S+F).tolist())])
 
         return dx, dw, db
 
