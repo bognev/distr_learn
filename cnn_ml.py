@@ -235,8 +235,8 @@ class CNN:
         X_scaler = StandardScaler(with_mean=True, with_std=True)
         self.X_train = X_scaler.fit_transform(self.X_train)
         self.X_test = X_scaler.transform(self.X_test)
-        self.X_train = self.X_train.reshape((7500, 3,32,32))
-        self.X_test = self.X_test.reshape((2500, 3, 32, 32))
+        self.X_train = self.X_train.reshape((75, 3,32,32))
+        self.X_test = self.X_test.reshape((25, 3, 32, 32))
         #mean_image = np.mean(self.X_train, axis=0)
         #self.X_train = self.X_train.astype(np.float64)
         #self.X_test = self.X_test.astype(np.float64)
@@ -247,13 +247,13 @@ class CNN:
 
         for i in range(self.num_layers):
             if i==0:
-                self.params["W" + str(i)] = np.sqrt(2/self.input_size) * np.random.randn(self.num_filters, self.input_dim[0], self.filter_size, self.filter_size)
+                self.params["W" + str(i)] = np.sqrt(2 / self.input_dim[0]) * np.random.randn(self.num_filters, self.input_dim[0], self.filter_size, self.filter_size)
                 self.params["b" + str(i)] = np.zeros(self.num_filters)
             elif i<self.num_layers-1:
-                self.params["W" + str(i)] = np.sqrt(2/self.num_filters*self.filter_size*self.filter_size) * np.random.randn(self.num_filters*self.filter_size*self.filter_size, self.hidden_dim)
+                self.params["W" + str(i)] = np.sqrt(2 / (self.num_filters*self.filter_size**2)) * np.random.randn(self.num_filters*self.filter_size**2, self.hidden_dim)
                 self.params["b" + str(i)] = np.zeros(hidden_dim)
             else:
-                self.params["W" + str(i)] = np.sqrt(2/hidden_dim) * np.random.randn(self.hidden_dim, self.C)
+                self.params["W" + str(i)] = np.sqrt(2 / self.hidden_dim) * np.random.randn(self.hidden_dim, self.C)
                 self.params["b" + str(i)] = np.zeros(self.C)
 
     def fit(self, X, y=None):
@@ -266,7 +266,8 @@ class CNN:
             if i == 0:
                 a[l], self.cache[l] = self.conv_relu_pool_forward(a[l_prev], W, b, conv_param, pool_param)
             if i == 1:
-                a[l], self.cache[l] = self.affine_relu_forward(a[l_prev].reshape((self.batch_size,32*7*7)), W, b)
+                a[l], self.cache[l] = self.affine_relu_forward(a[l_prev].reshape((X.shape[0],self.num_filters*self.filter_size**2)), W, b)
+
             if i == 2:
                 a[l], self.cache[l] = self.affine_forward(a[l_prev], W, b)
 
@@ -285,7 +286,7 @@ class CNN:
             l, l_prev = 'layer' + str(i + 1), 'layer' + str(i)
             w, b = "W" + str(i), "b" + str(i)
             if i == 0:
-                dout[l_prev], grad[w], grad[b] = self.conv_relu_pool_backward(dout[l].reshape((self.batch_size,32,7,7)), self.cache[l])
+                dout[l_prev], grad[w], grad[b] = self.conv_relu_pool_backward(dout[l].reshape((self.batch_size,self.num_filters,self.filter_size,self.filter_size)), self.cache[l])
             if i == 1:
                 dout[l_prev], grad[w], grad[b] = self.affine_relu_backward(dout[l], self.cache[l])
             if i == 2:
@@ -321,10 +322,10 @@ class CNN:
             if self.verbose and i % 10 == 0:
                 print('iteration %d / %d: loss %f' % (i, self.num_iter, loss))
             if i % iterations_per_epoch == 0:
-                self.config["learning_rate"] *= 0.85
+                self.config["learning_rate"] *= 1
                 train_loss, test_loss = 0,0
-                #train_loss = self.predict(self.X_train, self.y_train, N_train=1000, switch=1)
-                #test_loss = self.predict(self.X_test, self.y_test, switch=1)
+                train_loss = self.predict(self.X_train, self.y_train, N_train=1000, switch=1)
+                test_loss = self.predict(self.X_test, self.y_test, switch=1)
                 test_loss_story.append(test_loss)  # np.linalg.norm(self.W2))
                 train_loss_story.append(train_loss)  # np.linalg.norm(self.W2))
                 print('Epoch %d / %d: train_acc %f; test_acc %f; lr %f' % (num_epoch, self.num_epochs, train_loss, test_loss, self.config["learning_rate"]))
@@ -477,8 +478,8 @@ def rel_error(x, y):
   return np.max(np.abs(x - y) / (np.maximum(1e-8, np.abs(x) + np.abs(y))))
 
 
-cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", lr=1e-3, hidden_dim = 100, lmbd=0.01, C=10, \
-              batch_size=8, epoch=40, verbose=0, std=1e-3, N_train=10000, momentum=0.99, decay_rate=0.99)
+cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", input_dim = (3,32,32), hidden_dim=100, num_filters=16, filter_size=7, lr=1e-2, lmbd=0.00, C=10, \
+              batch_size=64, epoch=100, verbose=1, std=1e-4, N_train=100, momentum=0.99, decay_rate=0.99)
 
 #ann_clf.test()
 # x_shape = (4, 3, 7, 7)
