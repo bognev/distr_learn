@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib import style
 from scipy.signal import savgol_filter
 from sklearn.preprocessing import StandardScaler
+from fast_layers import max_pool_backward_fast, conv_backward_im2col, conv_forward_im2col, max_pool_forward_fast
 
 style.use("ggplot")
 import sys
@@ -257,7 +258,7 @@ class CNN:
                 self.params["b" + str(i)] = np.zeros(self.C)
 
     def fit(self, X, y=None):
-        conv_param = {'stride': 2, 'padding': 1}
+        conv_param = {'stride': 2, 'pad': 1}
         pool_param = {'stride': 2, 'pool_height': 2, 'pool_width': 2}
         a = {"layer0" : X}
         for i in range(self.num_layers):
@@ -266,7 +267,7 @@ class CNN:
             if i == 0:
                 a[l], self.cache[l] = self.conv_relu_pool_forward(a[l_prev], W, b, conv_param, pool_param)
             if i == 1:
-                a[l], self.cache[l] = self.affine_relu_forward(a[l_prev].reshape((X.shape[0],self.num_filters*self.filter_size**2)), W, b)
+                a[l], self.cache[l] = self.affine_relu_forward(a[l_prev].reshape((X.shape[0],self.num_filters*(self.filter_size-1)**2)), W, b)
 
             if i == 2:
                 a[l], self.cache[l] = self.affine_forward(a[l_prev], W, b)
@@ -457,18 +458,23 @@ class CNN:
         return dx
 
     def conv_relu_pool_forward(self, x, w, b, conv_param, pool_param):
-        z_conv, cache_conv = self.conv_forward_naive(x, w, b, conv_param)
+        #z_conv, cache_conv = self.conv_forward_naive(x, w, b, conv_param)
+        z_conv, cache_conv = conv_forward_im2col(x, w, b, conv_param)
         z_relu, cache_relu = self.relu_forward(z_conv)
-        z_pool, cache_pool = self.max_pool_forward_naive(z_relu, pool_param)
+        #z_pool, cache_pool = self.max_pool_forward_naive(z_relu, pool_param)
+        z_pool, cache_pool = max_pool_forward_fast(z_relu, pool_param)
+
         cache = (cache_conv, cache_relu, cache_pool)
 
         return z_pool, cache
 
     def conv_relu_pool_backward(self, dout, cache):
         cache_conv, cache_relu, cache_pool = cache
-        dout_pool = self.max_pool_backward(dout, cache_pool)
+        #dout_pool = self.max_pool_backward(dout, cache_pool)
+        dout_pool = max_pool_backward_fast(dout, cache_pool)
         dout_relu = self.relu_backward(dout_pool, cache_relu)
-        dx, dw, db = self.conv_backward_naive(dout_relu, cache_conv)
+        #dx, dw, db = self.conv_backward_naive(dout_relu, cache_conv)
+        dx, dw, db = conv_backward_im2col(dout_relu, cache_conv)
 
         return dx, dw, db
 
@@ -478,7 +484,7 @@ def rel_error(x, y):
   return np.max(np.abs(x - y) / (np.maximum(1e-8, np.abs(x) + np.abs(y))))
 
 
-cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", input_dim = (3,32,32), hidden_dim=100, num_filters=16, filter_size=7, lr=1e-2, lmbd=0.00, C=10, \
+cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", input_dim = (3,32,32), hidden_dim=100, num_filters=16, filter_size=8, lr=1e-2, lmbd=0.00, C=10, \
               batch_size=64, epoch=100, verbose=1, std=1e-4, N_train=100, momentum=0.99, decay_rate=0.99)
 
 #ann_clf.test()
