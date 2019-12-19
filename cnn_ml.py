@@ -8,10 +8,12 @@ import matplotlib.pyplot as plt
 from matplotlib import style
 from scipy.signal import savgol_filter
 from sklearn.preprocessing import StandardScaler
-from fast_layers import max_pool_backward_fast, conv_backward_im2col, conv_forward_im2col, max_pool_forward_fast
-
+from fast_layers import *
+from layer_utils import *
+from layers import relu_forward, relu_backward
 style.use("ggplot")
 import sys
+from PIL import Image
 
 
 class CNN:
@@ -46,9 +48,7 @@ class CNN:
         sys.stdout.flush()
 
     def affine_forward(self, x, w, b):
-        z = None
-        X = x
-        z = X @ w + b  # z = WX + b
+        z = x @ w + b  # z = WX + b
         cache = (x, w, b)
         return z, cache
 
@@ -61,16 +61,16 @@ class CNN:
         dw = X.T @ dout  # dz/wd = dot(dout, X)
         db = np.sum(dout, axis=0)   # dz/db = sum(dout)
         return dx, dw, db
-
-    def relu_forward(self, x):
-        cache = x
-        out = x * (x > 0)  # ReLu
-        return out, cache
-
-    def relu_backward(self, dout, cache):
-        x = cache
-        dx = dout * (x > 0)
-        return dx
+    #
+    # def relu_forward(self, x):
+    #     cache = x
+    #     out = x * (x > 0)  # ReLu
+    #     return out, cache
+    #
+    # def relu_backward(self, dout, cache):
+    #     x = cache
+    #     dx = dout * (x > 0)
+    #     return dx
 
     def softmax_loss(self, x, y):
         N = x.shape[0]
@@ -87,13 +87,13 @@ class CNN:
 
     def affine_relu_forward(self, x, w, b):
         z_fc, cache_fc = self.affine_forward(x, w, b)
-        z_relu, cache_relu = self.relu_forward(z_fc)
+        z_relu, cache_relu = relu_forward(z_fc)
         cache = (cache_fc, cache_relu)
         return z_relu, cache
 
     def affine_relu_backward(self, dout, cache):
         fc_cache, relu_cache = cache
-        da = self.relu_backward(dout, relu_cache)
+        da = relu_backward(dout, relu_cache)
         dx, dw, db = self.affine_backward(da, fc_cache)
         return dx, dw, db
 
@@ -231,12 +231,16 @@ class CNN:
             self.N_train = N_train
         self.X_train, self.X_test, self.y_train, self.y_test = \
             train_test_split(self.X[0:self.N_train, :], self.y[0:self.N_train])
-        self.X_train = self.X_train.astype(np.float64)
-        self.X_test = self.X_test.astype(np.float64)
-        X_scaler = StandardScaler(with_mean=True, with_std=True)
-        self.X_train = X_scaler.fit_transform(self.X_train)
-        self.X_test = X_scaler.transform(self.X_test)
-        self.X_train = self.X_train.reshape((self.X_train.shape[0], 3,32,32))
+        self.X_train = self.X_train.astype("uint8")
+        self.X_test = self.X_test.astype("uint8")
+        # X_scaler = StandardScaler(with_mean=True, with_std=True)
+        # self.X_train = X_scaler.fit_transform(self.X_train)
+        # self.X_test = X_scaler.transform(self.X_test)
+        self.X_train = self.X_train.reshape((self.X_train.shape[0], 3, 32, 32))
+        img = Image.fromarray(self.X_train[0].transpose(1,2,0).astype("uint8"), 'RGB')
+        img.save('my.png')
+        img.show()
+        self.X_train = self.X_train.reshape((self.X_train.shape[0], 3, 32, 32))
         self.X_test = self.X_test.reshape((self.X_test.shape[0], 3, 32, 32))
         #mean_image = np.mean(self.X_train, axis=0)
         #self.X_train = self.X_train.astype(np.float64)
@@ -245,62 +249,47 @@ class CNN:
         #self.X_test -= mean_image
         self.epsilon = 1e-4
         self.input_size = self.X_train.shape[0]
-        self.conv_param = {'stride': 1, 'pad': (self.filter_size - 1) / 2}
+        self.conv_param = {'stride': 1, 'pad': int((self.filter_size - 1) / 2)}
         self.pool_param = {'stride': 2, 'pool_height': 2, 'pool_width': 2}
 
         self.layer0_out_size = int((32 + 2 * self.conv_param['pad'] - self.filter_size) / self.conv_param['stride'] + 1)
         self.layer1_out_size = int((self.layer0_out_size - self.pool_param['pool_height']) / self.pool_param['stride'] + 1)
 
-        for i in range(self.num_layers):
-            if i==0:
-                self.params["W" + str(i)] = std * np.random.randn(self.num_filters, self.input_dim[0], self.filter_size, self.filter_size)
-                self.params["b" + str(i)] = np.zeros(self.num_filters)
-            elif i<self.num_layers-1:
-                self.params["W" + str(i)] = std * np.random.randn(self.num_filters*self.layer1_out_size**2, self.hidden_dim)
-                self.params["b" + str(i)] = np.zeros(hidden_dim)
-            else:
-                self.params["W" + str(i)] = std * np.random.randn(self.hidden_dim, self.C)
-                self.params["b" + str(i)] = np.zeros(self.C)
+        self.params["W0"] = std * np.random.randn(self.num_filters, self.input_dim[0], self.filter_size, self.filter_size)
+        self.params["b0"] = np.zeros(self.num_filters)
+        self.params["W1"] = std * np.random.randn(self.num_filters*self.layer1_out_size**2, self.hidden_dim)
+        self.params["b1"] = np.zeros(hidden_dim)
+        self.params["W2"] = std * np.random.randn(self.hidden_dim, self.C)
+        self.params["b2"] = np.zeros(self.C)
 
     def fit(self, X, y=None):
 
-        a = {"layer0" : X}
-        for i in range(self.num_layers):
-            l, l_prev = 'layer' + str(i + 1), 'layer' + str(i)
-            W, b = self.params["W"+str(i)], self.params["b"+str(i)]
-            if i == 0:
-                a[l], self.cache[l] = self.conv_relu_pool_forward(a[l_prev], W, b, self.conv_param, self.pool_param)
-            if i == 1:
-                a[l], self.cache[l] = self.affine_relu_forward(a[l_prev].reshape((a[l_prev].shape[0],-1)), W, b)
-            if i == 2:
-                a[l], self.cache[l] = self.affine_forward(a[l_prev], W, b)
+        W1, b1 = self.params['W0'], self.params['b0']
+        W2, b2 = self.params['W1'], self.params['b1']
+        W3, b3 = self.params['W2'], self.params['b2']
 
-        out = a["layer"+str(self.num_layers)]
+        out1, cache1 = conv_relu_pool_forward(X, W1, b1, self.conv_param, self.pool_param)
+        out2, cache2 = affine_relu_forward(out1, W2, b2)
+        scores, cache3 = affine_forward(out2, W3, b3)
+
+        out = scores
 
         if y is None:
             return out
 
-        loss, grad, dout  = 0, {}, {}
-        loss, delta = self.softmax_loss(out, y)
-        for i in range(self.num_layers):
-            w = "W"+str(i)
-            loss += 0.5 * self.lmbd * np.sum(self.params[w]**2)
+        loss,dx1 = softmax_loss(scores, y)
+        loss += 0.5*self.lmbd*(np.sum(W1**2)+np.sum(W2**2)+np.sum(W3**2))
+        grads = {}
 
-        for i in reversed(range(self.num_layers)):
-            l, l_prev = 'layer' + str(i + 1), 'layer' + str(i)
-            w, b = "W" + str(i), "b" + str(i)
-            if i == 0:
-                dout[l_prev], grad[w], grad[b] = self.conv_relu_pool_backward(dout[l].reshape((self.batch_size,self.num_filters,self.layer1_out_size,self.layer1_out_size)), self.cache[l])
-            if i == 1:
-                dout[l_prev], grad[w], grad[b] = self.affine_relu_backward(dout[l], self.cache[l])
-            if i == 2:
-                dout[l_prev], grad[w], grad[b] = self.affine_backward(delta, self.cache[l])
+        dout1, grads['W2'], grads['b2'] = affine_backward(dx1, cache3)
+        grads['W2'] += 2 * self.lmbd * self.params['W2']
+        dout2, grads['W1'], grads['b1'] = affine_relu_backward(dout1, cache2)
+        grads['W1'] += 2 * self.lmbd * self.params['W1']
+        _, grads['W0'], grads['b0'] = conv_relu_pool_backward(dout2, cache1)
+        grads['W0'] += 2 * self.lmbd * self.params['W0']
 
-        for i in range(self.num_layers):
-            w = "W" + str(i)
-            grad[w] += self.lmbd * self.params[w]
 
-        return loss, grad
+        return loss, grads
 
     def train(self):
         loss_story, test_loss_story, train_loss_story, weight_scale_story = [], [], [], []
@@ -316,14 +305,14 @@ class CNN:
             loss_story.append(loss)
             for ii in range(self.num_layers):
                 w, b = "W" + str(ii), "b" + str(ii)
-                self.params[w] = self.sgd(self.params[w], grad[w], w)
-                self.params[b] = self.sgd(self.params[b], grad[b], b)
+                self.params[w] = self.nesterov_momentum(self.params[w], grad[w], w)
+                self.params[b] = self.nesterov_momentum(self.params[b], grad[b], b)
 
             param_scale = np.linalg.norm(self.params["W0"].ravel())
             update_scale = self.config["learning_rate"]*np.linalg.norm(grad["W0"].ravel())/grad["W0"].ravel().shape[0]
             weight_scale_story.append(update_scale)
 
-            if self.verbose and i % 100 == 0:
+            if self.verbose and i % 1 == 0:
                 print('iteration %d / %d: loss %f' % (i, self.num_iter, loss))
             if i % iterations_per_epoch == 0:
                 self.config["learning_rate"] *= 1
@@ -460,26 +449,26 @@ class CNN:
 
         return dx
 
-    def conv_relu_pool_forward(self, x, w, b, conv_param, pool_param):
-        #z_conv, cache_conv = self.conv_forward_naive(x, w, b, conv_param)
-        z_conv, cache_conv = conv_forward_im2col(x, w, b, conv_param)
-        z_relu, cache_relu = self.relu_forward(z_conv)
-        #z_pool, cache_pool = self.max_pool_forward_naive(z_relu, pool_param)
-        z_pool, cache_pool = max_pool_forward_fast(z_relu, pool_param)
-
-        cache = (cache_conv, cache_relu, cache_pool)
-
-        return z_pool, cache
-
-    def conv_relu_pool_backward(self, dout, cache):
-        cache_conv, cache_relu, cache_pool = cache
-        #dout_pool = self.max_pool_backward(dout, cache_pool)
-        dout_pool = max_pool_backward_fast(dout, cache_pool)
-        dout_relu = self.relu_backward(dout_pool, cache_relu)
-        #dx, dw, db = self.conv_backward_naive(dout_relu, cache_conv)
-        dx, dw, db = conv_backward_im2col(dout_relu, cache_conv)
-
-        return dx, dw, db
+    # def conv_relu_pool_forward(self, x, w, b, conv_param, pool_param):
+    #     #z_conv, cache_conv = self.conv_forward_naive(x, w, b, conv_param)
+    #     z_conv, cache_conv = conv_forward_fast(x, w, b, conv_param)
+    #     z_relu, cache_relu = relu_forward(z_conv)
+    #     #z_pool, cache_pool = self.max_pool_forward_naive(z_relu, pool_param)
+    #     z_pool, cache_pool = max_pool_forward_fast(z_relu, pool_param)
+    #
+    #     cache = (cache_conv, cache_relu, cache_pool)
+    #
+    #     return z_pool, cache
+    #
+    # def conv_relu_pool_backward(self, dout, cache):
+    #     cache_conv, cache_relu, cache_pool = cache
+    #     #dout_pool = self.max_pool_backward(dout, cache_pool)
+    #     dout_pool = max_pool_backward_fast(dout, cache_pool)
+    #     dout_relu = relu_backward(dout_pool, cache_relu)
+    #     #dx, dw, db = self.conv_backward_naive(dout_relu, cache_conv)
+    #     dx, dw, db = conv_backward_fast(dout_relu, cache_conv)
+    #
+    #     return dx, dw, db
 
 
 
@@ -487,8 +476,8 @@ def rel_error(x, y):
   return np.max(np.abs(x - y) / (np.maximum(1e-8, np.abs(x) + np.abs(y))))
 
 
-cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", input_dim = (3,32,32), hidden_dim=100, num_filters=32, filter_size=7, lr=1e-3, lmbd=0.00, C=10, \
-              batch_size=64, epoch=10, verbose=1, std=1e-3, N_train=10000, momentum=0.99, decay_rate=0.99)
+cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", input_dim = (3,32,32), hidden_dim=500, num_filters=32, filter_size=7, lr=0.001, lmbd=0.001, C=10, \
+              batch_size=50, epoch=30, verbose=1, std=1e-2, N_train=100, momentum=0.99, decay_rate=0.99)
 
 #ann_clf.test()
 # x_shape = (4, 3, 7, 7)
