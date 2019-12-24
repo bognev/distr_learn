@@ -196,6 +196,23 @@ class CNN:
         w = w - lr * dw / (np.sqrt(self.v[name])+1e-8)
         return w
 
+    def adam(self, w, dw, name):
+        if self.v.get(name+"m") is None:
+            self.config.setdefault(name+"m", np.zeros_like(w))
+            self.config.setdefault(name+"v", np.zeros_like(w))
+            self.config.setdefault(name+"t", 0)
+
+        next_w = 0
+        self.config[name+"t"] += 1
+        self.config[name+"m"] = self.config["beta1"] * self.config[name+"m"] + (1-self.config["beta1"])*dw
+        mt = self.config[name+"m"]/(1-self.config['beta1']**self.config[name+"t"])
+        self.config[name+"v"] = self.config["beta2"] * self.config[name+"v"] + (1-self.config["beta2"])*(dw**2)
+        vt = self.config[name+"v"] / (1 - self.config['beta2'] ** self.config[name+"t"])
+        w = w - self.lr *  mt / (np.sqrt(vt) + self.epsilon)
+
+        return w
+
+
     def __init__(self, file, lr, input_dim = (3,32,32), hidden_dim=100, num_filters=32, filter_size=7, lmbd=0.01, C=10, std=1e-2, batch_size=64, epoch=30, verbose=0, N_train=None, \
                  momentum=0.5, decay_rate=0.99):
         self.input_dim = input_dim
@@ -203,6 +220,8 @@ class CNN:
         self.filter_size = filter_size
         self.hidden_dim = hidden_dim
         self.config = {"learning_rate" : lr, "momentum" : momentum, "decay_rate" : decay_rate}
+        self.config.setdefault("beta1", 0.9)
+        self.config.setdefault("beta2", 0.999)
         self.v = {}
         self.num_layers = 3
         self.params = {}
@@ -255,10 +274,13 @@ class CNN:
         self.layer0_out_size = int((32 + 2 * self.conv_param['pad'] - self.filter_size) / self.conv_param['stride'] + 1)
         self.layer1_out_size = int((self.layer0_out_size - self.pool_param['pool_height']) / self.pool_param['stride'] + 1)
 
+        # self.params["W0"] = np.sqrt(2 / (self.num_filters*self.filter_size**2)) * np.random.randn(self.num_filters, self.input_dim[0], self.filter_size, self.filter_size)
         self.params["W0"] = std * np.random.randn(self.num_filters, self.input_dim[0], self.filter_size, self.filter_size)
         self.params["b0"] = np.zeros(self.num_filters)
-        self.params["W1"] = std * np.random.randn(self.num_filters*self.layer1_out_size**2, self.hidden_dim)
+        # self.params["W1"] = np.sqrt(2 / (self.num_filters*self.layer1_out_size**2)) * np.random.randn(self.num_filters*self.layer1_out_size**2, self.hidden_dim)
+        self.params["W1"] = std * np.random.randn(self.num_filters * self.layer1_out_size ** 2, self.hidden_dim)
         self.params["b1"] = np.zeros(hidden_dim)
+        # self.params["W2"] = np.sqrt(2 / (hidden_dim)) * np.random.randn(self.hidden_dim, self.C)
         self.params["W2"] = std * np.random.randn(self.hidden_dim, self.C)
         self.params["b2"] = np.zeros(self.C)
 
@@ -294,8 +316,8 @@ class CNN:
     def train(self):
         loss_story, test_loss_story, train_loss_story, weight_scale_story = [], [], [], []
         num_train = self.X_train.shape[0]
-        iterations_per_epoch = np.round(max(num_train / self.batch_size, 1))
-        self.num_iter = np.round(self.num_epochs*iterations_per_epoch).astype(np.int)
+        iterations_per_epoch = max(num_train // self.batch_size, 1)
+        self.num_iter = self.num_epochs*iterations_per_epoch
         num_epoch = 1
         for i in range(self.num_iter):
             rand_range = np.random.randint(0, self.y_train.shape[0], self.batch_size)
@@ -305,8 +327,8 @@ class CNN:
             loss_story.append(loss)
             for ii in range(self.num_layers):
                 w, b = "W" + str(ii), "b" + str(ii)
-                self.params[w] = self.nesterov_momentum(self.params[w], grad[w], w)
-                self.params[b] = self.nesterov_momentum(self.params[b], grad[b], b)
+                self.params[w] = self.adam(self.params[w], grad[w], w)
+                self.params[b] = self.adam(self.params[b], grad[b], b)
 
             param_scale = np.linalg.norm(self.params["W0"].ravel())
             update_scale = self.config["learning_rate"]*np.linalg.norm(grad["W0"].ravel())/grad["W0"].ravel().shape[0]
@@ -315,7 +337,7 @@ class CNN:
             if self.verbose and i % 1 == 0:
                 print('iteration %d / %d: loss %f' % (i, self.num_iter, loss))
             if i % iterations_per_epoch == 0:
-                self.config["learning_rate"] *= 1
+                self.config["learning_rate"] *= 0.5
                 train_loss, test_loss = 0,0
                 train_loss = self.predict(self.X_train, self.y_train, N_train=1000, switch=1)
                 test_loss = self.predict(self.X_test, self.y_test, switch=1)
@@ -476,8 +498,8 @@ def rel_error(x, y):
   return np.max(np.abs(x - y) / (np.maximum(1e-8, np.abs(x) + np.abs(y))))
 
 
-cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", input_dim = (3,32,32), hidden_dim=500, num_filters=32, filter_size=7, lr=0.001, lmbd=0.001, C=10, \
-              batch_size=50, epoch=30, verbose=1, std=1e-2, N_train=100, momentum=0.99, decay_rate=0.99)
+cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", input_dim = (3,32,32), hidden_dim=500, num_filters=32, filter_size=7, lr=1e-3, lmbd=0.005, C=10, \
+              batch_size=50, epoch=32, verbose=0, std=1e-3, N_train=10000, momentum=0.99, decay_rate=0.99)
 
 #ann_clf.test()
 # x_shape = (4, 3, 7, 7)
