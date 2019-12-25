@@ -38,7 +38,6 @@ def affine_forward(x, w, b):
     cache = (x, w, b)
     return out, cache
 
-
 def affine_backward(dout, cache):
     """
     Computes the backward pass for an affine layer.

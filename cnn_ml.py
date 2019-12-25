@@ -14,6 +14,7 @@ from layers import relu_forward, relu_backward
 style.use("ggplot")
 import sys
 from PIL import Image
+from optim_self import adam
 
 
 class CNN:
@@ -46,171 +47,6 @@ class CNN:
         sys.stdout.write('\r')
         sys.stdout.write("[%-20s] %d%%" % ('=' * round(i / 10), (100 / self.num_epochs) * i))
         sys.stdout.flush()
-
-    def affine_forward(self, x, w, b):
-        z = x @ w + b  # z = WX + b
-        cache = (x, w, b)
-        return z, cache
-
-    def affine_backward(self, dout, cache):
-        x, w, b = cache
-        dx, dw, db = None, None, None
-        N = x.shape[0]
-        X = np.reshape(x, (N, -1))  # dout=dLoss/dz - gradient from previous step
-        dx = dout @ w.T   # dz/dx = dot(W.T, dout)
-        dw = X.T @ dout  # dz/wd = dot(dout, X)
-        db = np.sum(dout, axis=0)   # dz/db = sum(dout)
-        return dx, dw, db
-    #
-    # def relu_forward(self, x):
-    #     cache = x
-    #     out = x * (x > 0)  # ReLu
-    #     return out, cache
-    #
-    # def relu_backward(self, dout, cache):
-    #     x = cache
-    #     dx = dout * (x > 0)
-    #     return dx
-
-    def softmax_loss(self, x, y):
-        N = x.shape[0]
-        shiftx = x.T - x.T.max(0)
-        shiftx = np.exp(shiftx)
-        out = shiftx / np.sum(shiftx, axis=0)
-        out = out.T
-        loss = np.log(out[(np.arange(N), y)] / np.sum(out, axis=1) + self.epsilon)
-        loss = -np.sum(loss) / N
-        dout = out.copy()# dLoss/dx
-        dout[(np.arange(N), y)] -= 1
-        dout /= N
-        return loss, dout
-
-    def affine_relu_forward(self, x, w, b):
-        z_fc, cache_fc = self.affine_forward(x, w, b)
-        z_relu, cache_relu = relu_forward(z_fc)
-        cache = (cache_fc, cache_relu)
-        return z_relu, cache
-
-    def affine_relu_backward(self, dout, cache):
-        fc_cache, relu_cache = cache
-        da = relu_backward(dout, relu_cache)
-        dx, dw, db = self.affine_backward(da, fc_cache)
-        return dx, dw, db
-
-    def affine_batchnorm_relu_forward(self, x, w, b, gamma, betta, mode, name):
-        z_fc, cache_fc = self.affine_forward(x, w, b)
-        z_bn, cache_bn = self.batch_norm_forward(z_fc, gamma, betta, mode, name)
-        z_relu, cache_relu = self.relu_forward(z_bn)
-        cache = (cache_fc, cache_bn, cache_relu)
-        return z_relu, cache
-
-    def affine_batchnorm_relu_backward(self, dout, cache):
-        fc_cache, cache_bn, relu_cache = cache
-        da = self.relu_backward(dout, relu_cache)
-        dbn, dgamma, dbetta = self.batch_norm_backward(da, cache_bn)
-        dx, dw, db = self.affine_backward(dbn, fc_cache)
-        return dx, dw, db, dgamma, dbetta
-
-    def batch_norm_forward(self, x, gamma, betta, mode, name):
-        cache = None
-        if self.bn_param.get('running_mean' + name) is None:
-            self.bn_param['running_mean'+ name] = np.zeros_like(x.shape[0])
-            self.bn_param['running_var' + name] = np.zeros_like(x.shape[0])
-
-        running_mean = self.bn_param.get('running_mean'+ name)
-        running_var = self.bn_param.get('running_var' + name)
-        if mode == "train":
-            mu = np.sum(x, axis=0)/x.shape[0]
-            sigma = np.sum(np.power(x - mu,2), axis=0)/x.shape[0]
-            x_bn = (x - mu)/np.sqrt(sigma + self.epsilon)
-            y = gamma * x_bn + betta
-            running_mean = 0.9 * running_mean + (1 - 0.9) * mu
-            running_var = 0.9 * running_var + (1 - 0.9) * sigma
-            cache = (x, x_bn, mu, sigma, gamma, betta)
-        else:
-            x_bn = (x - running_mean) / np.sqrt(running_var + self.epsilon)
-            y = gamma * x_bn + betta
-        self.bn_param['running_mean'+name] = running_mean
-        self.bn_param['running_var'+name] = running_var
-
-        return y, cache
-
-    def dropout_forward(self, x, p, mode, cache):
-        r = np.random.binomial(1, p, x.shape) / p
-        if mode == 'train':
-            y = r*x
-        else:
-            y = x
-        fc_cache, cache_bn, relu_cache = cache
-        cache_do = (x, r)
-        cache_out = (fc_cache, cache_bn, relu_cache, cache_do)
-        return y, cache_out
-
-    def dropout_backward(self, dout, cache):
-        fc_cache, cache_bn, relu_cache, cache_do = cache
-        x, r = cache_do
-        cache_out = (fc_cache, cache_bn, relu_cache)
-        return dout*r, cache_out
-
-    def batch_norm_backward(self, dout, cache):
-        x, x_bn, mu, sigma, gamma, betta = cache
-        m=x.shape[0]
-        dx_bn = dout*gamma
-        dgamma = np.sum(dout*x_bn, axis=0)
-        dbetta = np.sum(dout, axis=0)
-        dsigma = np.sum(dout*(x-mu), axis=0)*-0.5*gamma*np.power(sigma+self.epsilon, -3/2)
-        dmu = np.sum(dout * -gamma, axis=0)/np.sqrt(sigma + self.epsilon) + \
-                dsigma*-2*np.sum(x-mu, axis=0)/m
-        dx = dx_bn/np.sqrt(sigma + self.epsilon) + dsigma*2*(x-mu)/m + dmu/m
-        return dx, dgamma, dbetta
-
-    def sgd(self, w, dw, config=None):
-        w -= self.lr * dw
-        return w
-
-    def sgd_momentum(self, w, dw, name):
-        if self.v.get(name) is None:
-            self.v[name] = np.zeros_like(w)
-        mu = self.config.get("momentum")
-        lr = self.config.get("learning_rate")
-        self.v[name] = mu * self.v[name] - lr * dw
-        w += self.v[name]
-        return w
-
-    def nesterov_momentum(self, w, dw, name):
-        if self.v.get(name) is None:
-            self.v[name] = np.zeros_like(w)
-        mu = self.config.get("momentum")
-        lr = self.config.get("learning_rate")
-        dw_ahead = dw + mu * self.v[name]
-        self.v[name] = mu * self.v[name] - lr * dw_ahead
-        w += self.v[name]
-        return w
-
-    def rmsprop(self, w, dw, name):
-        if self.v.get(name) is None:
-            self.v[name] = np.zeros_like(w)
-        lr = self.config.get("learning_rate")
-        dr = self.config.get("decay_rate")
-        self.v[name] = dr * self.v[name] + (1 - dr) * dw**2
-        w = w - lr * dw / (np.sqrt(self.v[name])+1e-8)
-        return w
-
-    def adam(self, w, dw, name):
-        if self.v.get(name+"m") is None:
-            self.config.setdefault(name+"m", np.zeros_like(w))
-            self.config.setdefault(name+"v", np.zeros_like(w))
-            self.config.setdefault(name+"t", 0)
-
-        next_w = 0
-        self.config[name+"t"] += 1
-        self.config[name+"m"] = self.config["beta1"] * self.config[name+"m"] + (1-self.config["beta1"])*dw
-        mt = self.config[name+"m"]/(1-self.config['beta1']**self.config[name+"t"])
-        self.config[name+"v"] = self.config["beta2"] * self.config[name+"v"] + (1-self.config["beta2"])*(dw**2)
-        vt = self.config[name+"v"] / (1 - self.config['beta2'] ** self.config[name+"t"])
-        w = w - self.lr *  mt / (np.sqrt(vt) + self.epsilon)
-
-        return w
 
 
     def __init__(self, file, lr, input_dim = (3,32,32), hidden_dim=100, num_filters=32, filter_size=7, lmbd=0.01, C=10, std=1e-2, batch_size=64, epoch=30, verbose=0, N_train=None, \
@@ -327,8 +163,8 @@ class CNN:
             loss_story.append(loss)
             for ii in range(self.num_layers):
                 w, b = "W" + str(ii), "b" + str(ii)
-                self.params[w] = self.adam(self.params[w], grad[w], w)
-                self.params[b] = self.adam(self.params[b], grad[b], b)
+                self.params[w] = adam(self.params[w], grad[w], w)
+                self.params[b] = adam(self.params[b], grad[b], b)
 
             param_scale = np.linalg.norm(self.params["W0"].ravel())
             update_scale = self.config["learning_rate"]*np.linalg.norm(grad["W0"].ravel())/grad["W0"].ravel().shape[0]
@@ -499,7 +335,7 @@ def rel_error(x, y):
 
 
 cnn_clf = CNN(file="./cifar-10-batches-py/data_batch_", input_dim = (3,32,32), hidden_dim=500, num_filters=32, filter_size=7, lr=1e-3, lmbd=0.005, C=10, \
-              batch_size=50, epoch=32, verbose=0, std=1e-3, N_train=10000, momentum=0.99, decay_rate=0.99)
+              batch_size=50, epoch=32, verbose=0, std=1e-3, N_train=1000, momentum=0.99, decay_rate=0.99)
 
 #ann_clf.test()
 # x_shape = (4, 3, 7, 7)
