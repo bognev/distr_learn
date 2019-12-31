@@ -38,7 +38,7 @@ def rmsprop(w, dw, name, config):
 
 
 def adam(w, dw, name, config):
-    if v.get(name + "m") is None:
+    if config.get(name + "m") is None:
         config.setdefault(name + "m", np.zeros_like(w))
         config.setdefault(name + "v", np.zeros_like(w))
         config.setdefault(name + "t", 0)
@@ -49,6 +49,6 @@ def adam(w, dw, name, config):
     mt = config[name + "m"] / (1 - config['beta1'] ** config[name + "t"])
     config[name + "v"] = config["beta2"] * config[name + "v"] + (1 - config["beta2"]) * (dw ** 2)
     vt = config[name + "v"] / (1 - config['beta2'] ** config[name + "t"])
-    w = w - lr * mt / (np.sqrt(vt) + epsilon)
+    w = w - config["learning_rate"] * mt / (np.sqrt(vt) + config["epsilon"])
 
-    return w
+    return w, config

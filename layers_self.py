@@ -127,3 +127,105 @@ def batch_norm_backward_m(dout, cache):
           dsigma * -2 * np.sum(x - mu, axis=0) / m
     dx = dx_bn / np.sqrt(sigma + 1e-8) + dsigma * 2 * (x - mu) / m + dmu / m
     return dx, dgamma, dbetta
+
+def conv_forward_naive_m(x, w, b, conv_params):
+    out, cache = None, None
+    N, C, W, H = x.shape # #images, #channels, width, height
+    K, _, F, F = w.shape # #filters, #channels, field width, field height
+    P = conv_params['padding']
+    S = conv_params['stride']
+    W_out = int((W - F + 2 * P) / S + 1)
+    H_out = int((H - F + 2 * P) / S + 1)
+    C_out = K
+    out_shape = (N, C_out, W_out, H_out)
+    out = np.zeros(out_shape)
+    x_pad = np.pad(x, ((0, 0), (0, 0), (P, P), (P, P)), mode='constant', constant_values=0)
+    for k in range(K): #over filters
+        for ix in range(W_out):
+            for iy in range(H_out):
+                out[:,k,ix,iy] = np.sum(w[k,np.arange(C)]*x_pad[np.ix_(np.arange(N), np.arange(C), np.arange(ix*S,ix*S+F),np.arange(iy*S,iy*S+F))], axis=(1,2,3)) + b[k]
+    # for n in range(N): #over images
+    #     for k in range(K): #over filters
+    #         for c in range(C): #over channels in image
+    #             for ix in range(W_out):
+    #                 for iy in range(H_out):
+    #                     # print(n, k, ix, iy)
+    #                     # print(list(np.arange(ix * S, ix * S + F)))
+    #                     # print(list(np.arange(iy * S, iy * S + F)))
+    #                     out[n,k,ix,iy] = out[n,k,ix,iy] + np.sum(w[k,c]*x[n,c][np.ix_(np.arange(ix*S,ix*S+F).tolist(),np.arange(iy*S,iy*S+F).tolist())])
+    cache = (x, w, b, conv_params)
+
+    return out, cache
+
+def conv_backward_naive_m(self, dout, cache):
+    x, w, b, conv_params = cache
+    N, K, W_out, H_out = dout.shape  # #images, #filters, out width, out height
+    _, C, F, _ = w.shape  # #filters, #channels, receptive field width, receptive field height
+    P = conv_params['padding']
+    S = conv_params['stride']
+    x_pad = np.pad(x, ((0, 0), (0, 0), (P, P), (P, P)), mode='constant', constant_values=0)
+    dx_pad = np.zeros_like(x_pad)#images, #channels, width, height
+    dw = np.zeros_like(w)#filters, #channels, field width, field height
+    db = np.zeros_like(b)
+
+    for n in range(N): #over images
+        for k in range(K): #over filters
+            for ix in range(W_out):
+                for iy in range(H_out):
+                    dw[k,:,:,:] += dout[n,k,ix,iy]*x_pad[n][np.ix_(np.arange(C), np.arange(ix*S,ix*S+F),np.arange(iy*S,iy*S+F))] #equal to convolution X and dL/dO
+                    db[k] += dout[n,k,ix,iy]
+                    dx_pad[n][np.ix_(np.arange(C), np.arange(ix*S,ix*S+F),np.arange(iy*S,iy*S+F))] += w[k,:,:,:] * dout[n,k,ix,iy] #equal to full convolution with W inverted
+    #https://medium.com/@pavisj/convolutions-and-backpropagations-46026a8f5d2c
+    dx = dx_pad[:, :, P:-P, P:-P]
+
+    return dx, dw, db
+
+def max_pool_forward_naive_m(self, x, pool_param):
+    PH, PW = pool_param["pool_height"], pool_param["pool_width"]
+    S = pool_param["stride"]
+    N, C, H, W = x.shape
+    H_out = int((H - PH) / S + 1)
+    W_out = int((W - PW) / S + 1)
+    out_shape = (N, C, H_out, W_out)
+    out = np.zeros(out_shape)
+    for n in range(N): #over images
+        for ix in range(W_out):
+            for iy in range(H_out):
+                out[n,:,ix,iy] = np.amax(x[n][np.ix_(np.arange(C),np.arange(ix*S,ix*S+PH),np.arange(iy*S,iy*S+PW))], axis=(1,2))
+
+    cache = (x, pool_param)
+    return out, cache
+
+def max_pool_backward_m(self, dout, cache):
+    x, pool_param = cache
+    PH, PW = pool_param["pool_height"], pool_param["pool_width"]
+    S = pool_param["stride"]
+    N, C, H, W = x.shape
+    _, _, H_out, W_out = dout.shape
+    dx = np.zeros_like(x)
+    for n in range(N): #over images
+        for c in range(C):
+            for ix in range(W_out):
+                for iy in range(H_out):
+                    max_index = np.unravel_index((x[n,c][np.ix_(np.arange(ix*S,ix*S+PH),np.arange(iy*S,iy*S+PW))]).argmax(), \
+                                                 (x[n,c][np.ix_(np.arange(ix*S,ix*S+PH),np.arange(iy*S,iy*S+PW))]).shape)
+                    max_index = np.array(max_index)+np.array((ix*S,iy*S))
+                    dx[n,c,max_index[0],max_index[1]] = dout[n, c, ix, iy]
+
+    return dx
+
+def conv_relu_pool_forward_m(x, w, b, conv_param, pool_param):
+    z_conv, cache_conv = conv_forward_naive_m(x, w, b, conv_param)
+    z_relu, cache_relu = relu_forward_m(z_conv)
+    z_pool, cache_pool = max_pool_forward_naive_m(z_relu, pool_param)
+    cache = (cache_conv, cache_relu, cache_pool)
+
+    return z_pool, cache
+
+def conv_relu_pool_backward_m(self, dout, cache):
+    cache_conv, cache_relu, cache_pool = cache
+    dout_pool = max_pool_backward_m(dout, cache_pool)
+    dout_relu = relu_backward_m(dout_pool, cache_relu)
+    dx, dw, db = conv_backward_naive_m(dout_relu, cache_conv)
+
+    return dx, dw, db

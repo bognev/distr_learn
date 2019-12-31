@@ -72,6 +72,8 @@ def conv_forward_strides(x, w, b, conv_param):
     x_cols.shape = (C * HH * WW, N * out_h * out_w)
 
     # Now all our convolutions are a big matrix multiply
+    # print(w.shape)
+    # print(x_cols.shape)
     res = w.reshape(K, -1).dot(x_cols) + b.reshape(-1, 1)
 
     # Reshape the output
