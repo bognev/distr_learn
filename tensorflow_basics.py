@@ -55,9 +55,9 @@ class Dataset:
         return iter((self.X[i:i+B], self.y[i:i+B]) for i in range(0, N, B))
 
 
-# train_dset = Dataset(X_train, y_train, batch_size=64, shuffle=True)
-# val_dset = Dataset(X_val, y_val, batch_size=64, shuffle=False)
-# test_dset = Dataset(X_test, y_test, batch_size=64, shuffle=False)
+train_dset = Dataset(X_train, y_train, batch_size=64, shuffle=True)
+val_dset = Dataset(X_val, y_val, batch_size=64, shuffle=False)
+test_dset = Dataset(X_test, y_test, batch_size=64, shuffle=False)
 
 # for t, (x, y) in enumerate(train_dset):
 #     print(t, x.shape, y.shape)
@@ -108,8 +108,8 @@ def three_layer_convnet(x, params):
     conv1_w, conv1_b, conv2_w, conv2_b, fc_w, fc_b = params
     scores = None
     pad = tf.constant([[0,0],[2,2],[2,2],[0,0]])
-    x_pad = tf.pad(x, pad)
-    conv1 = tf.nn.conv2d(x_pad, conv1_w, strides=[1,1,1,1], padding='VALID') + conv1_b
+    x = tf.pad(x, pad)
+    conv1 = tf.nn.conv2d(x, conv1_w, strides=[1,1,1,1], padding='VALID') + conv1_b
     relu1 = tf.nn.relu(conv1)
     pad = tf.constant([[0, 0], [1, 1], [1, 1], [0, 0]])
     relu1 = tf.pad(relu1, pad)
@@ -137,5 +137,59 @@ def three_layer_convnet_test():
     print('scores_np has shape: ', scores.shape)
 
 
-three_layer_convnet_test()
+# three_layer_convnet_test()
 
+def training_step(model_fn, x, y, params, learning_rate):
+    with tf.GradientTape() as tape:
+        scores = model_fn(x, params)
+        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=scores)
+        total_loss = tf.reduce_mean(loss)
+        grad_params = tape.gradient(total_loss, params)
+        for w, grad_w in zip(params, grad_params):
+            w.assign_sub(learning_rate * grad_w)
+        return total_loss
+
+def check_accuracy(dset, x, model_fn, params):
+    num_correct, num_samples = 0, 0
+    for x_batch, y_batch in dset:
+        scores_np = model_fn(x_batch, params).numpy()
+        y_pred = scores_np.argmax(axis=1)
+        num_samples+= x_batch.shape[0]
+        num_correct += (y_pred == y_batch).sum()
+    acc = float(num_correct)/num_samples
+    print('Got %d / %d correct (%.2f%%)' % (num_correct, num_samples, 100 * acc))
+
+def train_part2(model_fn, init_fn, learning_rate):
+    params = init_fn()
+    for t, (x_np, y_np) in enumerate(train_dset):
+        loss = training_step(model_fn, x_np, y_np, params, learning_rate)
+        if t%print_every == 0:
+            print('Iteration %d, loss = %.4f' % (t, loss))
+            check_accuracy(val_dset, x_np, model_fn, params)
+
+def random_weight(shape):
+    if len(shape) == 2:
+        fan_in, fan_out = shape[0], shape[1]
+    elif len(shape) == 4:
+        fan_in, fan_out = np.prod(shape[:3]), shape[3]
+    return tf.keras.backend.random_normal(shape) * np.sqrt(2.0/fan_in)
+
+def two_layer_fc_init():
+    hidden_layer_size = 4000
+    w1 = tf.Variable(random_weight((3*32*32, hidden_layer_size)))
+    w2 = tf.Variable(random_weight((hidden_layer_size, 10)))
+    return [w1, w2]
+
+learning_rate = 3e-3
+# train_part2(two_layer_fc, two_layer_fc_init, learning_rate)
+
+def three_layer_convnet_init():
+    conv_w1 = tf.Variable(random_weight((5,5,3,32)))
+    conv_b1 = tf.Variable(np.zeros((32,)), dtype=tf.float32)
+    conv_w2 = tf.Variable(random_weight((3, 3, 32, 16)))
+    conv_b2 = tf.Variable(np.zeros((16,)), dtype=tf.float32)
+    fc_w = tf.Variable(random_weight((32*32*16, 10)))
+    fc_b = tf.Variable(np.zeros((10,)), dtype=tf.float32)
+    return [conv_w1, conv_b1, conv_w2, conv_b2, fc_w, fc_b]
+
+train_part2(three_layer_convnet, three_layer_convnet_init, learning_rate)
