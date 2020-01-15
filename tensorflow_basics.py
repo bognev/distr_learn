@@ -192,4 +192,58 @@ def three_layer_convnet_init():
     fc_b = tf.Variable(np.zeros((10,)), dtype=tf.float32)
     return [conv_w1, conv_b1, conv_w2, conv_b2, fc_w, fc_b]
 
-train_part2(three_layer_convnet, three_layer_convnet_init, learning_rate)
+# train_part2(three_layer_convnet, three_layer_convnet_init, learning_rate)
+
+class TwoLayerFC(tf.keras.Model):
+    def __init__(self, hidden_size, num_classes):
+        super(TwoLayerFC, self).__init__()
+        initializer = tf.initializers.VarianceScaling(scale=2.0)
+        self.fc1 = tf.keras.layers.Dense(hidden_size, activation='relu', use_bias=True, kernel_initializer=initializer)
+        self.fc2 = tf.keras.layers.Dense(num_classes, activation='relu', use_bias=True, kernel_initializer=initializer)
+        self.flatten = tf.keras.layers.Flatten()
+
+    def __call__(self, x, training=False):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        x = self.flatten(x)
+        return x
+
+def TwoLayerFC_test():
+    input_size, hidden_size, num_classes = 50, 42, 10
+    x = tf.zeros((64, input_size))
+    model = TwoLayerFC(hidden_size, num_classes)
+    scores = model(x)
+    with tf.device(device):
+        print(scores.shape)
+
+# TwoLayerFC_test()
+
+class ThreeLayerConvNet(tf.keras.Model):
+    def __init__(self, channel_1, channel_2, num_classes):
+        super(ThreeLayerConvNet, self).__init__()
+        initializer = tf.initializers.VarianceScaling(scale=2.0)
+        self.conv1 = tf.keras.layers.Conv2D(channel_1, (5,5), padding='valid', kernel_initializer=initializer, activation='relu')
+        self.conv2 = tf.keras.layers.Conv2D(channel_2, (3,3), padding='valid', kernel_initializer=initializer, activation='relu')
+        self.flatten = tf.keras.layers.Flatten()
+        self.fc = tf.keras.layers.Dense(num_classes, kernel_initializer=initializer, activation='softmax')
+
+    def __call__(self, x, training=False):
+        pad = tf.constant([[0,0],[2,2],[2,2],[0,0]])
+        x = tf.pad(x, pad)
+        x = self.conv1(x)
+        pad = tf.constant([[0, 0], [1, 1], [1, 1], [0, 0]])
+        x = tf.pad(x, pad)
+        x = self.conv2(x)
+        x = self.flatten(x)
+        scores = self.fc(x)
+        return scores
+
+def test_ThreeLayerConvNet():
+    channel_1, channel_2, num_classes = 12, 8, 10
+    model = ThreeLayerConvNet(channel_1, channel_2, num_classes)
+    with tf.device(device):
+        x = tf.zeros((64, 3, 32, 32))
+        scores = model(x)
+        print(scores.shape)
+
+test_ThreeLayerConvNet()
