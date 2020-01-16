@@ -1,5 +1,7 @@
-import os
+
+# %tensorflow_version 2.x
 import tensorflow as tf
+import os
 import numpy as np
 import math
 import timeit
@@ -246,4 +248,57 @@ def test_ThreeLayerConvNet():
         scores = model(x)
         print(scores.shape)
 
-test_ThreeLayerConvNet()
+# test_ThreeLayerConvNet()
+
+
+def train_part34(model_init_fn, optimizer_init_fn, num_epochs=1, is_training=False):
+    with tf.device(device):
+        loss_fn = tf.keras.losses.SparseCategoricalCrossentropy()
+        model = model_init_fn()
+        optimizer = optimizer_init_fn()
+        train_loss =tf.keras.metrics.Mean(name='train_loss')
+        train_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+        val_loss = tf.keras.metrics.Mean(name='val_loss')
+        val_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='val_accuracy')
+        t = 0
+        for epoch in range(num_epochs):
+            train_loss.reset_states()
+            train_accuracy.reset_states()
+            for x_np, y_np in train_dset:
+                with tf.GradientTape() as tape:
+                    scores = model(x_np, training=is_training)
+                    loss = loss_fn(y_np, scores)
+                    gradients = tape.gradient(loss, model.trainable_variables)
+                    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+                    train_loss.update_state(loss)
+                    train_accuracy.update_state(y_np, scores)
+
+                    if t%print_every == 0:
+                        val_loss.reset_states()
+                        val_accuracy.reset_states()
+                        for x_test, y_test in val_dset:
+                            pred = model(x_test, training=False)
+                            test_loss = loss_fn(y_test, pred)
+                            val_loss.update_state(test_loss)
+                            val_accuracy.update_state(y_np, scores)
+                        template = 'Iteration {}, Epoch {}, Loss: {}, Accuracy: {}, Val Loss: {}, Val Accuracy: {}'
+                        print(template.format(t, epoch + 1,
+                                              train_loss.result(),
+                                              train_accuracy.result() * 100,
+                                              val_loss.result(),
+                                              val_accuracy.result() * 100))
+                    t += 1
+
+
+hidden_size, num_classes = 512, 10
+learning_rate = 1e-2
+
+def model_init_fn():
+    return TwoLayerFC(hidden_size, num_classes)
+
+def optimizer_init_fn():
+    return tf.keras.optimizers.SGD(learning_rate=learning_rate)
+
+train_part34(model_init_fn, optimizer_init_fn, num_epochs=1)
+
