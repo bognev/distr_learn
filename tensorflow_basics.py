@@ -1,5 +1,5 @@
 
-# %tensorflow_version 2.x
+%tensorflow_version 2.x
 import tensorflow as tf
 import os
 import numpy as np
@@ -66,7 +66,7 @@ test_dset = Dataset(X_test, y_test, batch_size=64, shuffle=False)
 #     if t > 5:
 #         break
 
-USE_GPU = False
+USE_GPU = True
 if USE_GPU:
     device = '/device:GPU:0'
 else:
@@ -201,13 +201,13 @@ class TwoLayerFC(tf.keras.Model):
         super(TwoLayerFC, self).__init__()
         initializer = tf.initializers.VarianceScaling(scale=2.0)
         self.fc1 = tf.keras.layers.Dense(hidden_size, activation='relu', use_bias=True, kernel_initializer=initializer)
-        self.fc2 = tf.keras.layers.Dense(num_classes, activation='relu', use_bias=True, kernel_initializer=initializer)
+        self.fc2 = tf.keras.layers.Dense(num_classes, activation='softmax', use_bias=True, kernel_initializer=initializer)
         self.flatten = tf.keras.layers.Flatten()
 
     def __call__(self, x, training=False):
+        x = self.flatten(x)
         x = self.fc1(x)
         x = self.fc2(x)
-        x = self.flatten(x)
         return x
 
 def TwoLayerFC_test():
@@ -281,7 +281,7 @@ def train_part34(model_init_fn, optimizer_init_fn, num_epochs=1, is_training=Fal
                             pred = model(x_test, training=False)
                             test_loss = loss_fn(y_test, pred)
                             val_loss.update_state(test_loss)
-                            val_accuracy.update_state(y_np, scores)
+                            val_accuracy.update_state(y_test, pred)
                         template = 'Iteration {}, Epoch {}, Loss: {}, Accuracy: {}, Val Loss: {}, Val Accuracy: {}'
                         print(template.format(t, epoch + 1,
                                               train_loss.result(),
@@ -291,7 +291,8 @@ def train_part34(model_init_fn, optimizer_init_fn, num_epochs=1, is_training=Fal
                     t += 1
 
 
-hidden_size, num_classes = 512, 10
+
+hidden_size, num_classes = 4000, 10
 learning_rate = 1e-2
 
 def model_init_fn():
@@ -300,5 +301,5 @@ def model_init_fn():
 def optimizer_init_fn():
     return tf.keras.optimizers.SGD(learning_rate=learning_rate)
 
-train_part34(model_init_fn, optimizer_init_fn, num_epochs=1)
+train_part34(model_init_fn, optimizer_init_fn, num_epochs=1, is_training=True)
 
