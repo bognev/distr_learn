@@ -301,5 +301,46 @@ def model_init_fn():
 def optimizer_init_fn():
     return tf.keras.optimizers.SGD(learning_rate=learning_rate)
 
-train_part34(model_init_fn, optimizer_init_fn, num_epochs=1, is_training=True)
+# train_part34(model_init_fn, optimizer_init_fn, num_epochs=1, is_training=True)
 
+def model_init_fn():
+    input_shappe = (32, 32, 3)
+    hidden_size, num_classes = 4000, 10
+    init = tf.keras.initializers.VarianceScaling(scale=2.0)
+    layers = [
+        tf.keras.layers.Flatten(input_shape=input_shappe)
+        tf.keras.layers.Dense(hidden_size=hidden_size, activation='relu', kernel_initializer=init)
+        tf.keras.layers.Dense(hidden_size=num_classes, activation='softmax', kernel_initializer=init)
+    ]
+    model = tf.keras.Sequential(layers)
+    return model
+# train_part2(model_init_fn, tf.keras.optimizers.SGD(learning_rate=learning_rate))
+# model = model_init_fn()
+# model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=learning_rate),
+#               loss='sparse_categorical_crossentropy',
+#               metrics=[tf.keras.metrics.sparse_categorical_accuracy])
+# model.fit(X_train, y_train, batch_size=64, epochs=1, validation_data=(X_val, y_val))
+# model.evaluate(X_test, y_test)
+
+def two_layer_fc_functional(input_shape, hidden_size, num_classes):
+    init = tf.keras.initializers.VarianceScaling(scale=2)
+    input = tf.keras.Input(shape=input_shape)
+    flattened_inputs = tf.keras.layers.Flatten()(input)
+    fc1_output = tf.keras.layers.Dense(kernel_initializer=init, activation='relu', units=hidden_size)(flattened_inputs)
+    scores = tf.keras.layers.Dense(kernel_initializer=init, activation='softmax', units=num_classes)(fc1_output)
+    model = tf.keras.Model(inputs=input, outputs=scores)
+    return model
+
+def two_layer_fc_functional_test():
+    input_size, hidden_size, num_classes = 50, 42, 10
+    input_shape = (50,)
+
+    x = tf.zeros((64, input_size))
+    model = two_layer_fc_functional(input_shape, hidden_size, num_classes)
+
+    with tf.device(device):
+        scores = model(x)
+        print(scores.shape)
+
+
+two_layer_fc_functional_test()
